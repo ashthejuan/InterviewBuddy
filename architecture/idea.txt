@@ -1,0 +1,10 @@
+Interactive interview application
+
+Uses livekit or custom logic for interactive voice ai interviewer
+User uploads resume or jd file/text content
+Application parses it in the background
+Creates embeddings of the document
+Has the /grill-me skill to ask questions
+User can define how easy/hard they want the interview to be, how long, etc.
+LLM generates questions based on embeddings, and verifies users answer against same embeddings
+Scores the user on correctness, clarity, confidence, etc.
