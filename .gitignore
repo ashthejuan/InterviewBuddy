@@ -1,2 +1,7 @@
 .agents/*
 skills-lock.json
+
+# Secrets — keep `.env.example` tracked; never commit `.env`
+.env
+.env.local
+.env.*.local
