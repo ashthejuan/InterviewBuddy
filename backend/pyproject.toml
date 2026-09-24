@@ -7,11 +7,16 @@ requires-python = ">=3.11"
 dependencies = [
     "alembic>=1.20.0",
     "asyncpg>=0.31.0",
+    "boto3>=1.43.101",
     "fastapi>=0.141.1",
     "greenlet>=3.5.6",
+    "pgvector>=0.5.0",
     "psycopg[binary]>=3.3.6",
     "pydantic-settings>=2.15.0",
+    "pypdf>=6.19.0",
+    "python-docx>=1.2.0",
     "python-dotenv>=1.2.3",
+    "python-multipart>=0.0.32",
     "sqlalchemy>=2.0.54",
     "structlog>=26.1.0",
     "uvicorn[standard]>=0.53.0",
@@ -19,6 +24,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
     "ruff>=0.16.8",
 ]
 

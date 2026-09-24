@@ -1,7 +1,7 @@
 # InterviewBuddy — Product & Technical Decisions (PRD)
 
 Status: brainstorming decisions locked for implementation planning  
-Last updated: 2026-09-21
+Last updated: 2026-09-24
 
 ---
 
@@ -59,26 +59,54 @@ Document-conditioned grilling (not generic question banks): vet the candidate’
 
 ### 3.1 Supported upload formats (locked)
 
-Resume and JD may be uploaded as:
+Resume and JD may be uploaded as **files** or **pasted text**:
 
-| Format | Extensions | Extract approach (FastAPI) |
-|--------|------------|----------------------------|
+| Format | Extensions / input | Extract approach (FastAPI) |
+|--------|--------------------|----------------------------|
 | PDF | `.pdf` | `pypdf` / `pdfminer.six` for text PDFs; flag scanned/image PDFs for OCR later |
 | Plain text | `.txt` | UTF-8 read (fallback encodings) |
 | Word | `.docx` | `python-docx` (MVP: `.docx` only, not legacy `.doc`) |
 | Markdown | `.md` / `.markdown` | Read as text; preserve headings for section hints |
+| Paste | JSON/text body (no file) | Same path as TXT after length check; optional store as `.txt` in R2 for audit |
 
-- Max size / MIME allowlist enforced in FastAPI before R2 upload.
-- Store **original bytes in R2**; store `content_type`, `original_filename`, `byte_size` on `documents`.
-- Extraction failure → `parse_status = failed` with user-visible error (e.g. scanned PDF needs OCR — deferred).
+- Store **original bytes in R2** (files; paste may be stored as `.txt`); store `content_type`, `original_filename`, `byte_size` on `documents`.
+- Extraction / validation failure → `parse_status = failed` with user-visible error (e.g. scanned PDF needs OCR — deferred; too large; parse timeout).
+
+### 3.1.1 Upload & extraction safety (locked)
+
+Treat all uploads and pasted text as **untrusted data**. Validation is O(n) in file/text size and **must not** add a second model call.
+
+**Crash / DoS (enforce earliest first)**
+
+| Control | Rule | On violate |
+|---------|------|------------|
+| Hard request size | Max upload **5 MB** (`Content-Length` + actual bytes read). Prefer stream to R2; do not keep full bytes in the API process longer than needed. | `413` / `400` before R2 / prep |
+| Allowlist + sniff | Allow only PDF, DOCX, TXT, MD (+ paste). Verify extension **and** magic bytes / DOCX zip header; reject Content-Type or filename mismatch. | `400` |
+| Paste / input cap | Pasted body max **100k characters** (same budget as post-extract text). | `400` |
+| Post-extract caps | After extract: max **100k chars** of plain text; PDF max **30 pages**; DOCX max **uncompressed** size (e.g. **20 MB** expanded) to blunt zip bombs. Exceed → fail (or truncate only if product later opts in; MVP = **fail**). | `parse_status=failed` |
+| Extract timeout | Wall-clock cap on PDF/DOCX extract (e.g. **10 s**). Timeout ≠ “too large” — it means unsuitable/pathological to parse; same user-facing failure family as scan/OCR-needed. | `parse_status=failed` |
+| Async prep | Upload/paste returns after R2 + `documents` row (`parse_status=pending`/`processing`). Chunk/embed/claims/topics run off the request path with worker timeouts. | N/A (UX) |
+
+Structural caps (bytes/pages/chars/uncompressed) are the “too large / too dense” signal. Timeouts are a **backstop** for misbehaving content.
+
+**Prompt injection (document content has no instruction authority)**
+
+| Control | Rule |
+|---------|------|
+| Role separation | Fixed system/policy prompts. Resume/JD only in delimited **data** blocks (or retrieved evidence quotes) — never concatenated into the system prompt. |
+| Normalize text | After extract: Unicode NFC, strip nulls/control chars; store `raw_text` for audit; feed **normalized** text to chunk/embed/LLM. |
+| Retrieval packing | Grill/score context packs chunks as candidate-provided **evidence**, with an explicit instruction to ignore directives inside documents. |
+| No execution surface | PDF/DOCX → plain text only. Never eval, shell, or HTML-render uploaded bytes. |
+
+Deferred (not MVP): jailbreak-phrase classifiers, per-user rate limits (Phase 7).
 
 ### 3.2 Prep steps
 
-1. User uploads resume (+ optional JD) → stored in **R2**; metadata in Postgres.
-2. Format-specific extract → plain text → **section-aware parse**.
+1. User uploads resume (+ optional JD) or pastes text → validate (§3.1.1) → store in **R2**; metadata in Postgres; return quickly while prep continues async.
+2. Format-specific extract (bounded) → normalize → plain text → **section-aware parse**.
 3. Chunk with **parent–child** strategy (see §4).
 4. Embed children with **bge-small** → store in **pgvector**.
-5. Extract **claims** (metrics, ownership, skills, scope) linked to chunks.
+5. Extract **claims** (metrics, ownership, skills, scope) linked to chunk ids — LLM sees documents only as delimited data (§3.1.1).
 6. Build **session lexicon** (skills, tools, companies, metrics) for STT keyterms + deterministic repair.
 7. Plan **topics** + initial **frontier nodes**; set session `status = ready`.
 8. Interview **must not start** until prep is ready (no async embed race mid-conversation).
@@ -420,7 +448,9 @@ Agent worker (Python) owns: lexicon normalize → frontier policy → retrieve �
 | Scoring           | Rubric v1 dims, evidence-backed                      |
 | ASR repair        | Deterministic lexicon/fuzzy only                     |
 | Docker philosophy | Light images; external speech APIs; local embeddings |
-| Upload formats    | PDF, TXT, DOCX, Markdown                             |
+| Upload formats    | PDF, TXT, DOCX, Markdown, paste                      |
+| Upload safety     | 5 MB + sniff; post-extract caps; extract timeout; async prep |
+| Doc→LLM trust     | Untrusted data only; role sep; normalize; evidence pack |
 | Post-interview    | Structured report (JSON + markdown; PDF optional)    |
 
 

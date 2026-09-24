@@ -17,7 +17,8 @@ Root `.env` (+ commit-safe `.env.example`) with variables required by the PRD st
 - Local embeddings model id + dims (no key)
 - Sarvam STT/TTS
 - LiveKit URL + API credentials
-- Upload size limit
+- Upload size limit (`MAX_UPLOAD_BYTES`, default 5 MB)
+- Paste char limit (`MAX_PASTE_CHARS`)
 
 ## Files
 

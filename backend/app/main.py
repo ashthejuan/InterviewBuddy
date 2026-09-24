@@ -5,7 +5,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.db import engine
 from app.logging_setup import configure_logging
+from app.routers import router as api_router
 
 log = structlog.get_logger()
 
@@ -16,6 +18,7 @@ async def lifespan(_app: FastAPI):
     configure_logging(settings.app_env)
     log.info("app_start", env=settings.app_env)
     yield
+    await engine.dispose()
     log.info("app_stop")
 
 
@@ -33,6 +36,8 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    app.include_router(api_router)
 
     return app
 

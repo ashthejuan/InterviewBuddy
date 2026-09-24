@@ -18,6 +18,17 @@ class Settings(BaseSettings):
     )
     dev_user_id: str = "00000000-0000-0000-0000-000000000001"
 
+    # R2 / MinIO (S3-compatible)
+    r2_access_key_id: str = "minioadmin"
+    r2_secret_access_key: str = "minioadmin"
+    r2_bucket: str = "interviewbuddy-docs"
+    r2_endpoint_url: str = "http://localhost:9000"
+    r2_region: str = "auto"
+
+    # Upload / extract caps (PRD §3.1.1)
+    max_upload_bytes: int = 5 * 1024 * 1024
+    max_paste_chars: int = 100_000
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

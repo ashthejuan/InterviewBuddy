@@ -7,7 +7,7 @@ from app.config import get_settings
 
 
 class Base(DeclarativeBase):
-    """ORM base — models land in Phase 1."""
+    """ORM base."""
 
 
 settings = get_settings()
