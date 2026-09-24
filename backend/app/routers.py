@@ -17,13 +17,16 @@ from fastapi import (
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.db import get_session
-from app.models import Document, InterviewSession, User
+from app.models import Document, DocumentSection, InterviewSession, User
 from app.schemas import (
     DocumentOut,
     PasteDocumentIn,
+    SectionOut,
+    ChunkOut,
     SessionCreate,
     SessionOut,
     UserCreate,
@@ -118,6 +121,47 @@ async def get_document(
     if doc is None:
         raise HTTPException(status_code=404, detail="document not found")
     return doc
+
+
+@router.get("/documents/{document_id}/sections", response_model=list[SectionOut])
+async def list_document_sections(
+    document_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+) -> list[SectionOut]:
+    doc = await db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="document not found")
+
+    result = await db.execute(
+        select(DocumentSection)
+        .where(DocumentSection.document_id == document_id)
+        .options(selectinload(DocumentSection.chunks))
+        .order_by(DocumentSection.ordinal)
+    )
+    sections = result.scalars().all()
+    out: list[SectionOut] = []
+    for sec in sections:
+        chunks = [
+            ChunkOut(
+                id=c.id,
+                chunk_kind=c.chunk_kind,
+                content=c.content,
+                parent_chunk_id=c.parent_chunk_id,
+                metadata=c.metadata_ or {},
+            )
+            for c in sec.chunks
+        ]
+        out.append(
+            SectionOut(
+                id=sec.id,
+                kind=sec.kind,
+                title=sec.title,
+                text=sec.text,
+                ordinal=sec.ordinal,
+                chunks=chunks,
+            )
+        )
+    return out
 
 
 @router.post(

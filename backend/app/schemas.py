@@ -81,3 +81,20 @@ class DocumentOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ChunkOut(BaseModel):
+    id: uuid.UUID
+    chunk_kind: str
+    content: str
+    parent_chunk_id: uuid.UUID | None
+    metadata: dict[str, Any]
+
+
+class SectionOut(BaseModel):
+    id: uuid.UUID
+    kind: str
+    title: str | None
+    text: str
+    ordinal: int
+    chunks: list[ChunkOut] = Field(default_factory=list)

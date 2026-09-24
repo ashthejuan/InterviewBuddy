@@ -69,6 +69,48 @@ def test_paste_jd(client: TestClient) -> None:
     assert session["jd_document_id"] == doc["id"]
 
 
+def test_upload_resume_creates_sections_and_chunks(client: TestClient) -> None:
+    _, session_id = _seed_session(client)
+    content = b"""Jane Doe
+Backend Engineer
+
+EXPERIENCE
+
+Acme Corp - Senior Engineer (2021-2024)
+- Built billing API handling 2M req/day
+- Reduced p99 latency 40% via caching
+
+SKILLS
+
+Python, FastAPI, Postgres
+"""
+    r = client.post(
+        f"/sessions/{session_id}/documents",
+        data={"doc_type": "resume"},
+        files={"file": ("resume.txt", content, "text/plain")},
+    )
+    assert r.status_code == 201, r.text
+    doc_id = r.json()["id"]
+    done = _wait_doc(client, doc_id)
+    assert done["parse_status"] == "ready", done
+
+    sections = client.get(f"/documents/{doc_id}/sections")
+    assert sections.status_code == 200, sections.text
+    body = sections.json()
+    kinds = {s["kind"] for s in body}
+    assert "experience" in kinds
+    assert "skills" in kinds
+    total_chunks = sum(len(s["chunks"]) for s in body)
+    assert total_chunks >= 3
+    children = [
+        c
+        for s in body
+        for c in s["chunks"]
+        if c["parent_chunk_id"] is not None
+    ]
+    assert any(c["chunk_kind"] == "bullet" for c in children)
+
+
 def test_rejects_oversize_upload(client: TestClient) -> None:
     from app.config import get_settings
 

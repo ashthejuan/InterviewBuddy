@@ -1,4 +1,4 @@
-"""Async document prep: extract + normalize into documents.raw_text."""
+"""Async document prep: extract → normalize → section parse → chunk."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from app.db import SessionLocal
 from app.models import Document
 from app.services.extract import ExtractError, extract_bytes
 from app.services.normalize import normalize_text
+from app.services.persist_chunks import persist_sections_and_chunks
 
 log = structlog.get_logger()
 
@@ -29,9 +30,19 @@ async def run_extract_job(document_id: uuid.UUID, data: bytes, kind: str) -> Non
                 text = data.decode("utf-8")
             else:
                 text = extract_bytes(data, kind=kind)
-            doc.raw_text = normalize_text(text)
+            normalized = normalize_text(text)
+            doc.raw_text = normalized
+            n_sections, n_chunks = await persist_sections_and_chunks(
+                db, doc, text=normalized
+            )
             doc.parse_status = "ready"
             doc.parse_error = None
+            log.info(
+                "extract_ready",
+                document_id=str(document_id),
+                sections=n_sections,
+                chunks=n_chunks,
+            )
         except ExtractError as exc:
             doc.parse_status = "failed"
             doc.parse_error = str(exc)

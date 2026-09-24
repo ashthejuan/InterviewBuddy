@@ -12,3 +12,4 @@
 #   POST /sessions/{id}/documents       — multipart: doc_type + file (pdf/docx/txt/md)
 #   POST /sessions/{id}/documents/paste — JSON: {doc_type, text}
 #   GET  /documents/{id}                — poll parse_status / raw_text
+#   GET  /documents/{id}/sections       — sections + parent/child chunks
