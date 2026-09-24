@@ -1,7 +1,18 @@
 .agents/*
 skills-lock.json
 
+# Local phase notes (not tracked)
+architecture/phases/
+
 # Secrets — keep `.env.example` tracked; never commit `.env`
 .env
 .env.local
 .env.*.local
+
+# Python / Node local artifacts (backend & frontend also have local ignores)
+**/__pycache__/
+**/.venv/
+**/.ruff_cache/
+**/.pytest_cache/
+**/node_modules/
+**/.next/
