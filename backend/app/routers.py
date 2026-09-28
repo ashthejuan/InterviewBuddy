@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import uuid
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -21,14 +23,23 @@ from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.db import get_session
-from app.models import Document, DocumentSection, InterviewSession, User
+from app.models import (
+    Document,
+    DocumentSection,
+    FrontierNode,
+    InterviewSession,
+    SessionTopic,
+    User,
+)
 from app.schemas import (
+    ChunkOut,
     DocumentOut,
+    FrontierNodeOut,
     PasteDocumentIn,
     SectionOut,
-    ChunkOut,
     SessionCreate,
     SessionOut,
+    TopicOut,
     UserCreate,
     UserOut,
 )
@@ -112,6 +123,60 @@ async def get_session_by_id(
     return session
 
 
+@router.post("/sessions/{session_id}/start", response_model=SessionOut)
+async def start_session(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+) -> InterviewSession:
+    session = await db.get(InterviewSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if session.status in ("preparing", "failed"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"session not ready (status={session.status})",
+        )
+    if session.status == "ready":
+        now = datetime.now(timezone.utc)
+        duration = int((session.settings or {}).get("duration_minutes", 30))
+        session.status = "live"
+        session.started_at = now
+        session.ends_at = now + timedelta(minutes=duration)
+        await db.commit()
+        await db.refresh(session)
+    return session
+
+
+@router.get("/sessions/{session_id}/topics", response_model=list[TopicOut])
+async def list_session_topics(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+) -> list[SessionTopic]:
+    session = await db.get(InterviewSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    result = await db.execute(
+        select(SessionTopic)
+        .where(SessionTopic.session_id == session_id)
+        .order_by(SessionTopic.priority.desc(), SessionTopic.title)
+    )
+    return list(result.scalars().all())
+
+
+@router.get("/sessions/{session_id}/frontier", response_model=list[FrontierNodeOut])
+async def list_session_frontier(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+) -> list[FrontierNode]:
+    session = await db.get(InterviewSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    result = await db.execute(
+        select(FrontierNode).where(FrontierNode.session_id == session_id)
+    )
+    return list(result.scalars().all())
+
+
 @router.get("/documents/{document_id}", response_model=DocumentOut)
 async def get_document(
     document_id: uuid.UUID,
@@ -148,6 +213,7 @@ async def list_document_sections(
                 content=c.content,
                 parent_chunk_id=c.parent_chunk_id,
                 metadata=c.metadata_ or {},
+                has_embedding=c.embedding is not None,
             )
             for c in sec.chunks
         ]

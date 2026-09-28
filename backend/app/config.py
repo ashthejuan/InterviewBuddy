@@ -29,6 +29,20 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 5 * 1024 * 1024
     max_paste_chars: int = 100_000
 
+    # Embeddings (local FastEmbed)
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_dims: int = 384
+
+    # OpenRouter
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_grill_model: str = ""
+    openrouter_score_model: str = ""
+    openrouter_report_model: str = ""
+    openrouter_claims_model: str = ""
+    # auto | heuristic | openrouter
+    claims_backend: str = "auto"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

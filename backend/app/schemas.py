@@ -50,8 +50,34 @@ class SessionOut(BaseModel):
     resume_document_id: uuid.UUID | None
     jd_document_id: uuid.UUID | None
     n_target: int | None
+    lexicon: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class TopicOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    kind: str
+    priority: int
+    status: str
+    claim_id: uuid.UUID | None
+    soft_cap_seconds: int
+    hard_cap_seconds: int
+
+    model_config = {"from_attributes": True}
+
+
+class FrontierNodeOut(BaseModel):
+    id: uuid.UUID
+    topic_id: uuid.UUID
+    status: str
+    intent: str | None
+    question_mode: str
+    depth_level: int
+    parent_id: uuid.UUID | None
 
     model_config = {"from_attributes": True}
 
@@ -89,6 +115,7 @@ class ChunkOut(BaseModel):
     content: str
     parent_chunk_id: uuid.UUID | None
     metadata: dict[str, Any]
+    has_embedding: bool = False
 
 
 class SectionOut(BaseModel):
