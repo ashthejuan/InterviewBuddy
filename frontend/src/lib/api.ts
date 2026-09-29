@@ -31,6 +31,8 @@ export type SessionOut = {
   jd_document_id: string | null;
   n_target: number | null;
   lexicon: Record<string, unknown>;
+  started_at: string | null;
+  ends_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -60,6 +62,21 @@ export type TopicOut = {
   claim_id: string | null;
   soft_cap_seconds: number;
   hard_cap_seconds: number;
+};
+
+export type TurnOut = {
+  id: string;
+  role: "agent" | "user" | string;
+  raw_text: string;
+  topic_id: string | null;
+  frontier_node_id: string | null;
+  created_at: string;
+};
+
+export type AnswerOut = {
+  session: SessionOut;
+  user_turn: TurnOut;
+  agent_turn: TurnOut | null;
 };
 
 export class ApiError extends Error {
@@ -134,6 +151,25 @@ export async function startSession(sessionId: string): Promise<SessionOut> {
 
 export async function getSessionTopics(sessionId: string): Promise<TopicOut[]> {
   return api<TopicOut[]>(`/sessions/${sessionId}/topics`);
+}
+
+export async function getSessionTurns(sessionId: string): Promise<TurnOut[]> {
+  return api<TurnOut[]>(`/sessions/${sessionId}/turns`);
+}
+
+export async function answerSession(
+  sessionId: string,
+  text: string,
+): Promise<AnswerOut> {
+  return api<AnswerOut>(`/sessions/${sessionId}/answer`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+}
+
+export async function endSession(sessionId: string): Promise<SessionOut> {
+  return api<SessionOut>(`/sessions/${sessionId}/end`, { method: "POST" });
 }
 
 export async function getDocument(documentId: string): Promise<DocumentOut> {

@@ -29,9 +29,12 @@ from app.models import (
     FrontierNode,
     InterviewSession,
     SessionTopic,
+    Turn,
     User,
 )
 from app.schemas import (
+    AnswerIn,
+    AnswerOut,
     ChunkOut,
     DocumentOut,
     FrontierNodeOut,
@@ -40,9 +43,11 @@ from app.schemas import (
     SessionCreate,
     SessionOut,
     TopicOut,
+    TurnOut,
     UserCreate,
     UserOut,
 )
+from app.services import grill as grill_svc
 from app.services.prep import run_extract_job
 from app.services.storage import StorageError, build_object_key, put_bytes
 from app.services.validate_upload import (
@@ -142,6 +147,75 @@ async def start_session(
         session.status = "live"
         session.started_at = now
         session.ends_at = now + timedelta(minutes=duration)
+        await grill_svc.begin_interview(db, session)
+        await db.commit()
+        await db.refresh(session)
+    elif session.status == "live":
+        # Idempotent re-start: ensure opening question exists
+        await grill_svc.begin_interview(db, session)
+        await db.commit()
+        await db.refresh(session)
+    return session
+
+
+@router.get("/sessions/{session_id}/turns", response_model=list[TurnOut])
+async def list_session_turns(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+) -> list[Turn]:
+    session = await db.get(InterviewSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    result = await db.execute(
+        select(Turn)
+        .where(Turn.session_id == session_id)
+        .order_by(Turn.created_at, Turn.id)
+    )
+    return list(result.scalars().all())
+
+
+@router.post("/sessions/{session_id}/answer", response_model=AnswerOut)
+async def answer_session(
+    session_id: uuid.UUID,
+    body: AnswerIn,
+    db: AsyncSession = Depends(get_session),
+) -> AnswerOut:
+    session = await db.get(InterviewSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if session.status != "live":
+        raise HTTPException(
+            status_code=409,
+            detail=f"session not live (status={session.status})",
+        )
+    user_turn, agent_turn = await grill_svc.submit_answer(db, session, body.text.strip())
+    await db.commit()
+    await db.refresh(session)
+    await db.refresh(user_turn)
+    if agent_turn is not None:
+        await db.refresh(agent_turn)
+    return AnswerOut(
+        session=SessionOut.model_validate(session),
+        user_turn=TurnOut.model_validate(user_turn),
+        agent_turn=TurnOut.model_validate(agent_turn) if agent_turn else None,
+    )
+
+
+@router.post("/sessions/{session_id}/end", response_model=SessionOut)
+async def end_session(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+) -> InterviewSession:
+    session = await db.get(InterviewSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if session.status not in ("live", "completed"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"session cannot end (status={session.status})",
+        )
+    if session.status == "live":
+        await grill_svc.end_interview(db, session)
         await db.commit()
         await db.refresh(session)
     return session

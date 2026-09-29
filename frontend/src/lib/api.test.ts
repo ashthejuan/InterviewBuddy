@@ -209,6 +209,8 @@ describe("getSession / getDocument / startSession", () => {
           jd_document_id: null,
           n_target: 4,
           lexicon: {},
+          started_at: "2026-09-29T12:00:00Z",
+          ends_at: "2026-09-29T12:15:00Z",
           created_at: "",
           updated_at: "",
         }),
@@ -217,6 +219,80 @@ describe("getSession / getDocument / startSession", () => {
     });
     const session = await startSession("s1");
     expect(session.status).toBe("live");
+    expect(session.ends_at).toBe("2026-09-29T12:15:00Z");
+  });
+
+  it("posts answer and returns turns", async () => {
+    const { answerSession } = await import("./api");
+    stubFetch((input, init) => {
+      expect(String(input)).toContain("/sessions/s1/answer");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ text: "I built caches" });
+      return new Response(
+        JSON.stringify({
+          session: {
+            id: "s1",
+            user_id: "u1",
+            status: "live",
+            settings: {},
+            resume_document_id: "d1",
+            jd_document_id: null,
+            n_target: 4,
+            lexicon: {},
+            started_at: "2026-09-29T12:00:00Z",
+            ends_at: "2026-09-29T12:15:00Z",
+            created_at: "",
+            updated_at: "",
+          },
+          user_turn: {
+            id: "tu",
+            role: "user",
+            raw_text: "I built caches",
+            topic_id: "t1",
+            frontier_node_id: "n1",
+            created_at: "",
+          },
+          agent_turn: {
+            id: "ta",
+            role: "agent",
+            raw_text: "What specifically?",
+            topic_id: "t1",
+            frontier_node_id: "n1",
+            created_at: "",
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    const out = await answerSession("s1", "I built caches");
+    expect(out.agent_turn?.raw_text).toContain("specifically");
+  });
+
+  it("posts end and returns completed session", async () => {
+    const { endSession } = await import("./api");
+    stubFetch((input, init) => {
+      expect(String(input)).toContain("/sessions/s1/end");
+      expect(init?.method).toBe("POST");
+      return new Response(
+        JSON.stringify({
+          id: "s1",
+          user_id: "u1",
+          status: "completed",
+          settings: {},
+          resume_document_id: "d1",
+          jd_document_id: null,
+          n_target: 4,
+          lexicon: {},
+          started_at: "2026-09-29T12:00:00Z",
+          ends_at: "2026-09-29T12:15:00Z",
+          created_at: "",
+          updated_at: "",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    const session = await endSession("s1");
+    expect(session.status).toBe("completed");
   });
 
   it("throws ApiError with detail on 409 start", async () => {

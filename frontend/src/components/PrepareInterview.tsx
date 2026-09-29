@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ApiError,
   createSession,
@@ -18,6 +19,26 @@ import {
   type TopicOut,
 } from "@/lib/api";
 import { canStartInterview, prepLabel } from "@/lib/prep";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 
 type InputMode = "file" | "paste";
 
@@ -50,93 +71,90 @@ function DocPanel({
   disabled?: boolean;
 }) {
   return (
-    <section className="rounded-[14px] border border-hairline bg-white p-6">
-      <div className="mb-4 flex items-baseline justify-between gap-3">
-        <h3 className="text-[17px] font-semibold tracking-[-0.01em] text-ink">
+    <Card className="shadow-none ring-border">
+      <CardHeader className="flex-row items-baseline justify-between gap-3 space-y-0">
+        <CardTitle className="text-[17px] font-semibold tracking-[-0.01em]">
           {label}
           {required ? (
-            <span className="ml-1 text-accent">*</span>
+            <span className="ml-1 text-brand">*</span>
           ) : (
-            <span className="ml-2 text-[13px] font-normal text-muted">
+            <span className="ml-2 text-[13px] font-normal text-muted-foreground">
               optional
             </span>
           )}
-        </h3>
+        </CardTitle>
         {doc && (
-          <span
-            className={`font-mono text-[12px] ${
+          <Badge
+            variant="outline"
+            className={
               doc.parse_status === "failed"
-                ? "text-accent"
+                ? "border-transparent bg-brand-soft font-mono text-brand"
                 : doc.parse_status === "ready"
-                  ? "text-accent-ink"
-                  : "text-muted"
-            }`}
+                  ? "border-transparent bg-secondary font-mono text-link"
+                  : "font-mono text-muted-foreground"
+            }
           >
             {doc.parse_status}
-          </span>
+          </Badge>
         )}
-      </div>
-
-      <div className="mb-4 flex gap-2 text-[14px]">
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onMode("file")}
-          className={`rounded-lg px-3 py-1.5 ${
-            mode === "file"
-              ? "bg-ink text-white"
-              : "bg-paper text-ink-soft hover:bg-cream"
-          }`}
-        >
-          Upload file
-        </button>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onMode("paste")}
-          className={`rounded-lg px-3 py-1.5 ${
-            mode === "paste"
-              ? "bg-ink text-white"
-              : "bg-paper text-ink-soft hover:bg-cream"
-          }`}
-        >
-          Paste text
-        </button>
-      </div>
-
-      {mode === "file" ? (
-        <label className="flex cursor-pointer flex-col items-start gap-2 rounded-[10px] border border-dashed border-hairline bg-paper px-4 py-5 transition hover:border-muted">
-          <span className="text-[14px] font-medium text-ink">
-            {fileName ?? "Choose PDF, DOCX, TXT, or Markdown"}
-          </span>
-          <span className="text-[13px] text-muted">Max 5 MB</span>
-          <input
-            type="file"
-            accept={ACCEPT}
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={mode === "file" ? "default" : "secondary"}
             disabled={disabled}
-            className="sr-only"
-            onChange={(e) => onFile(e.target.files?.[0] ?? null)}
-          />
-        </label>
-      ) : (
-        <textarea
-          value={paste}
-          disabled={disabled}
-          onChange={(e) => onPaste(e.target.value)}
-          placeholder="Paste resume or job description…"
-          rows={7}
-          className="w-full resize-y rounded-[10px] border border-hairline bg-paper px-3 py-2.5 text-[15px] text-ink-soft outline-none focus:border-ink"
-        />
-      )}
+            onClick={() => onMode("file")}
+          >
+            Upload file
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={mode === "paste" ? "default" : "secondary"}
+            disabled={disabled}
+            onClick={() => onMode("paste")}
+          >
+            Paste text
+          </Button>
+        </div>
 
-      {doc?.parse_error && (
-        <p className="mt-3 text-[14px] text-accent">{doc.parse_error}</p>
-      )}
-    </section>
+        {mode === "file" ? (
+          <label className="flex cursor-pointer flex-col items-start gap-2 rounded-[10px] border border-dashed border-input bg-muted/40 px-4 py-5 transition hover:border-muted-foreground/40">
+            <span className="text-sm font-medium text-foreground">
+              {fileName ?? "Choose PDF, DOCX, TXT, or Markdown"}
+            </span>
+            <span className="text-[13px] text-muted-foreground">Max 5 MB</span>
+            <input
+              type="file"
+              accept={ACCEPT}
+              disabled={disabled}
+              className="sr-only"
+              onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+            />
+          </label>
+        ) : (
+          <Textarea
+            value={paste}
+            disabled={disabled}
+            onChange={(e) => onPaste(e.target.value)}
+            placeholder="Paste resume or job description…"
+            rows={7}
+            className="min-h-40 resize-y bg-muted/40"
+          />
+        )}
+
+        {doc?.parse_error && (
+          <p className="text-sm text-brand">{doc.parse_error}</p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
 export function PrepareInterview() {
+  const router = useRouter();
   const [duration, setDuration] = useState(30);
   const [difficulty, setDifficulty] = useState<Difficulty>("medium");
   const [seniority, setSeniority] = useState<Seniority>("mid");
@@ -234,8 +252,7 @@ export function PrepareInterview() {
           : await pasteDocument(created.id, "resume", resumePaste.trim());
       setResumeDoc(resume);
 
-      const hasJd =
-        jdMode === "file" ? !!jdFile : jdPaste.trim().length > 0;
+      const hasJd = jdMode === "file" ? !!jdFile : jdPaste.trim().length > 0;
       if (hasJd) {
         const jd =
           jdMode === "file"
@@ -260,6 +277,7 @@ export function PrepareInterview() {
       const live = await startSession(session.id);
       setSession(live);
       setStarted(true);
+      router.push(`/sessions/${live.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Start failed");
     } finally {
@@ -275,71 +293,104 @@ export function PrepareInterview() {
   return (
     <div className="mx-auto min-h-screen max-w-[980px] px-6 pb-24 pt-16 md:px-10">
       <header className="rise-in mb-14 max-w-[620px]">
-        <p className="mb-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-accent">
+        <p className="mb-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-brand">
           InterviewBuddy
         </p>
-        <h1 className="mb-4 text-[40px] font-semibold leading-[1.08] tracking-[-0.022em] text-ink md:text-[48px]">
+        <h1 className="mb-4 font-heading text-[40px] font-semibold leading-[1.08] tracking-[-0.022em] text-foreground md:text-[48px]">
           Prep before you grill.
         </h1>
-        <p className="text-[17px] text-ink-soft">
+        <p className="max-w-[60ch] text-[17px] text-foreground/85">
           Upload a resume and optional job description. We parse, chunk, and
           plan topics — then unlock Start when the session is ready.
         </p>
       </header>
 
       <form onSubmit={onPrepare} className="rise-in space-y-6">
-        <section className="rounded-[14px] border border-hairline bg-white p-6">
-          <p className="mb-4 text-[12px] font-semibold uppercase tracking-[0.14em] text-accent">
-            Session settings
-          </p>
-          <div className="grid gap-5 sm:grid-cols-3">
-            <label className="block text-[13px] text-muted">
-              Duration
-              <select
-                value={duration}
-                onChange={(e) => setDuration(Number(e.target.value))}
-                disabled={busy}
-                className="mt-1.5 w-full rounded-lg border border-hairline bg-paper px-3 py-2.5 text-[15px] text-ink outline-none focus:border-ink"
-              >
-                {DURATIONS.map((d) => (
-                  <option key={d} value={d}>
-                    {d} min
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-[13px] text-muted">
-              Difficulty
-              <select
-                value={difficulty}
-                onChange={(e) => setDifficulty(e.target.value as Difficulty)}
-                disabled={busy}
-                className="mt-1.5 w-full rounded-lg border border-hairline bg-paper px-3 py-2.5 text-[15px] text-ink outline-none focus:border-ink"
-              >
-                {DIFFICULTIES.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-[13px] text-muted">
-              Seniority
-              <select
-                value={seniority}
-                onChange={(e) => setSeniority(e.target.value as Seniority)}
-                disabled={busy}
-                className="mt-1.5 w-full rounded-lg border border-hairline bg-paper px-3 py-2.5 text-[15px] text-ink outline-none focus:border-ink"
-              >
-                {SENIORITIES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </section>
+        <Card className="shadow-none ring-border">
+          <CardHeader>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-brand">
+              Session settings
+            </p>
+            <CardDescription>
+              Duration, difficulty, and seniority feed topic planning.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-5 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label className="text-[13px] font-normal text-muted-foreground">
+                  Duration
+                </Label>
+                <Select
+                  value={String(duration)}
+                  onValueChange={(v) => {
+                    if (v != null) setDuration(Number(v));
+                  }}
+                  disabled={busy}
+                >
+                  <SelectTrigger className="w-full bg-muted/40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DURATIONS.map((d) => (
+                      <SelectItem key={d} value={String(d)}>
+                        {d} min
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-[13px] font-normal text-muted-foreground">
+                  Difficulty
+                </Label>
+                <Select
+                  value={difficulty}
+                  onValueChange={(v) => {
+                    if (v != null) setDifficulty(v as Difficulty);
+                  }}
+                  disabled={busy}
+                >
+                  <SelectTrigger className="w-full bg-muted/40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DIFFICULTIES.map((d) => (
+                      <SelectItem key={d} value={d}>
+                        {d}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-[13px] font-normal text-muted-foreground">
+                  Seniority
+                </Label>
+                <Select
+                  value={seniority}
+                  onValueChange={(v) => {
+                    if (v != null) setSeniority(v as Seniority);
+                  }}
+                  disabled={busy}
+                >
+                  <SelectTrigger className="w-full bg-muted/40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SENIORITIES.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         <DocPanel
           label="Resume"
@@ -367,96 +418,111 @@ export function PrepareInterview() {
         />
 
         <div className="flex flex-wrap items-center gap-3 pt-2">
-          <button
+          <Button
             type="submit"
             disabled={busy}
-            className="rounded-lg bg-ink px-6 py-3 text-[16px] font-medium text-white disabled:opacity-50"
+            size="lg"
+            className="h-11 rounded-[980px] px-6 text-[15px]"
           >
             {busy ? "Working…" : session ? "Re-prepare" : "Prepare session"}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={onStart}
             disabled={!ready || busy}
-            className="rounded-lg bg-accent px-6 py-3 text-[16px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+            size="lg"
+            className="h-11 rounded-lg bg-brand px-6 text-[15px] font-semibold text-white hover:bg-brand/90"
           >
             Start interview
-          </button>
+          </Button>
         </div>
       </form>
 
       {error && (
-        <p className="mt-6 rounded-[10px] border border-hairline bg-cream px-4 py-3 text-[14px] text-accent">
-          {error}
-        </p>
+        <Alert
+          variant="destructive"
+          className="mt-6 border-border bg-secondary"
+        >
+          <AlertDescription className="text-brand">{error}</AlertDescription>
+        </Alert>
       )}
 
       {session && (
-        <section className="rise-in mt-10 rounded-[14px] border border-hairline bg-white p-6">
-          <p className="mb-2 text-[12px] font-semibold uppercase tracking-[0.14em] text-accent">
-            Prep status
-          </p>
-          <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
-            <p className="text-[22px] font-semibold tracking-[-0.01em] text-ink">
-              {prepLabel(session.status)}
+        <Card className="rise-in mt-10 shadow-none ring-border">
+          <CardHeader>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-brand">
+              Prep status
             </p>
-            <p className="font-mono text-[13px] text-muted">
-              {session.id.slice(0, 8)}…
-            </p>
-            {session.n_target != null && (
-              <p className="text-[14px] text-ink-soft">
-                N<sub>target</sub>{" "}
-                <span className="font-semibold text-ink">{session.n_target}</span>
+            <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+              <CardTitle className="text-[22px] font-semibold tracking-[-0.01em]">
+                {prepLabel(session.status)}
+              </CardTitle>
+              <span className="font-mono text-[13px] text-muted-foreground">
+                {session.id.slice(0, 8)}…
+              </span>
+              {session.n_target != null && (
+                <span className="text-sm text-foreground/85">
+                  N<sub>target</sub>{" "}
+                  <span className="font-semibold text-foreground">
+                    {session.n_target}
+                  </span>
+                </span>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {started && session.status === "live" && (
+              <p className="text-[15px] text-foreground/85">
+                Opening live grill…
               </p>
             )}
-          </div>
 
-          {started && session.status === "live" && (
-            <p className="mt-4 text-[15px] text-ink-soft">
-              Session is live. Text grill UI arrives in Phase 3.
-            </p>
-          )}
-
-          {lexiconSkills.length > 0 && (
-            <div className="mt-5">
-              <p className="mb-2 text-[13px] text-muted">Lexicon skills</p>
-              <div className="flex flex-wrap gap-2">
-                {lexiconSkills.slice(0, 12).map((s) => (
-                  <span
-                    key={s}
-                    className="rounded-full bg-[rgba(255,102,0,0.1)] px-3 py-1 text-[12px] font-semibold text-accent"
-                  >
-                    {s}
-                  </span>
-                ))}
+            {lexiconSkills.length > 0 && (
+              <div>
+                <p className="mb-2 text-[13px] text-muted-foreground">
+                  Lexicon skills
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {lexiconSkills.slice(0, 12).map((s) => (
+                    <Badge
+                      key={s}
+                      className="border-transparent bg-brand-soft font-mono text-brand"
+                    >
+                      {s}
+                    </Badge>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {topics.length > 0 && (
-            <div className="mt-6">
-              <p className="mb-3 text-[13px] text-muted">Planned topics</p>
-              <ul className="divide-y divide-hairline border-t border-hairline">
-                {topics.map((t) => (
-                  <li
-                    key={t.id}
-                    className="flex items-baseline justify-between gap-4 py-3 text-[15px]"
-                  >
-                    <span className="text-ink">{t.title}</span>
-                    <span className="shrink-0 font-mono text-[12px] text-muted">
-                      {t.kind}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </section>
+            {topics.length > 0 && (
+              <div>
+                <p className="mb-3 text-[13px] text-muted-foreground">
+                  Planned topics
+                </p>
+                <Separator />
+                <ul>
+                  {topics.map((t) => (
+                    <li key={t.id}>
+                      <div className="flex items-baseline justify-between gap-4 py-3 text-[15px]">
+                        <span className="text-foreground">{t.title}</span>
+                        <span className="shrink-0 font-mono text-[12px] text-muted-foreground">
+                          {t.kind}
+                        </span>
+                      </div>
+                      <Separator />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
 
-      <p className="mt-16 max-w-[42ch] font-serif text-[22px] italic leading-snug text-ink-soft">
+      {/* <p className="mt-16 max-w-[42ch] font-serif text-[22px] italic leading-snug text-foreground/85">
         “Every question points back to your resume.”
-      </p>
+      </p> */}
     </div>
   );
 }

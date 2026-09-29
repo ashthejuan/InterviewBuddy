@@ -51,10 +51,33 @@ class SessionOut(BaseModel):
     jd_document_id: uuid.UUID | None
     n_target: int | None
     lexicon: dict[str, Any] = Field(default_factory=dict)
+    started_at: datetime | None = None
+    ends_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AnswerIn(BaseModel):
+    text: str = Field(min_length=1, max_length=20_000)
+
+
+class TurnOut(BaseModel):
+    id: uuid.UUID
+    role: str
+    raw_text: str
+    topic_id: uuid.UUID | None
+    frontier_node_id: uuid.UUID | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AnswerOut(BaseModel):
+    session: SessionOut
+    user_turn: TurnOut
+    agent_turn: TurnOut | None = None
 
 
 class TopicOut(BaseModel):

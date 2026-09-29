@@ -94,7 +94,7 @@ def extract_claims_heuristic(chunks: list[ChunkRef]) -> list[ClaimDraft]:
 
 async def extract_claims_openrouter(chunks: list[ChunkRef]) -> list[ClaimDraft]:
     settings = get_settings()
-    if not settings.openrouter_api_key or not settings.openrouter_claims_model:
+    if not settings.openrouter_api_key or not settings.claims_model:
         return extract_claims_heuristic(chunks)
 
     # Cap payload — untrusted doc text as delimited data only (PRD §3.1.1)
@@ -116,7 +116,7 @@ async def extract_claims_openrouter(chunks: list[ChunkRef]) -> list[ClaimDraft]:
         "Content-Type": "application/json",
     }
     body = {
-        "model": settings.openrouter_claims_model,
+        "model": settings.claims_model,
         "messages": [
             {
                 "role": "system",
@@ -168,6 +168,6 @@ async def extract_claims(chunks: list[ChunkRef]) -> list[ClaimDraft]:
     if backend == "openrouter":
         return await extract_claims_openrouter(chunks)
     # auto
-    if settings.openrouter_api_key and settings.openrouter_claims_model:
+    if settings.openrouter_api_key and settings.claims_model:
         return await extract_claims_openrouter(chunks)
     return extract_claims_heuristic(chunks)

@@ -33,15 +33,38 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_dims: int = 384
 
-    # OpenRouter
+    # OpenRouter — one default model for all LLM jobs; optional per-job overrides
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    default_grill_model: str = "qwen/qwen3.7-flash"
+    # Optional overrides (empty → DEFAULT_GRILL_MODEL)
     openrouter_grill_model: str = ""
     openrouter_score_model: str = ""
     openrouter_report_model: str = ""
     openrouter_claims_model: str = ""
     # auto | heuristic | openrouter
     claims_backend: str = "auto"
+    # auto | stub | openrouter — auto uses OpenRouter when key + resolved grill model set
+    grill_backend: str = "auto"
+
+    def _resolve_llm_model(self, override: str) -> str:
+        return (override or self.default_grill_model).strip()
+
+    @property
+    def grill_model(self) -> str:
+        return self._resolve_llm_model(self.openrouter_grill_model)
+
+    @property
+    def score_model(self) -> str:
+        return self._resolve_llm_model(self.openrouter_score_model)
+
+    @property
+    def report_model(self) -> str:
+        return self._resolve_llm_model(self.openrouter_report_model)
+
+    @property
+    def claims_model(self) -> str:
+        return self._resolve_llm_model(self.openrouter_claims_model)
 
     @property
     def cors_origin_list(self) -> list[str]:
