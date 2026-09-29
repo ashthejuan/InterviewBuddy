@@ -16,3 +16,5 @@ architecture/phases/
 **/.pytest_cache/
 **/node_modules/
 **/.next/
+
+style-guide.html
