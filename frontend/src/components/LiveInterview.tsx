@@ -9,11 +9,19 @@ import {
   getSession,
   getSessionTopics,
   getSessionTurns,
+  getVoiceStatus,
   type SessionOut,
   type TopicOut,
   type TurnOut,
 } from "@/lib/api";
 import { formatCountdown, secondsRemaining } from "@/lib/timer";
+import { useVoiceRoom } from "@/lib/useVoiceRoom";
+import {
+  canJoinVoice,
+  displayTurnText,
+  isVoiceActive,
+  voicePhaseLabel,
+} from "@/lib/voice";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +34,7 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { SessionResults } from "@/components/SessionResults";
 
 export function LiveInterview({ sessionId }: { sessionId: string }) {
   const [session, setSession] = useState<SessionOut | null>(null);
@@ -35,6 +44,10 @@ export function LiveInterview({ sessionId }: { sessionId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const voice = useVoiceRoom(sessionId);
+  const voiceActive = isVoiceActive(voice.phase);
+  const leaveVoice = voice.leave;
 
   const refresh = useCallback(async () => {
     const [s, t, tr] = await Promise.all([
@@ -68,10 +81,39 @@ export function LiveInterview({ sessionId }: { sessionId: string }) {
     return () => window.clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    getVoiceStatus()
+      .then((s) => setVoiceEnabled(s.enabled))
+      .catch(() => setVoiceEnabled(false));
+  }, []);
+
+  // The agent writes turns server-side; poll while the call is up.
+  useEffect(() => {
+    if (!voiceActive) return;
+    const id = window.setInterval(() => {
+      refresh().catch(() => undefined);
+    }, 2500);
+    return () => window.clearInterval(id);
+  }, [voiceActive, refresh]);
+
   const remaining = secondsRemaining(session?.ends_at ?? null, nowMs);
   const activeTopic = topics.find((t) => t.status === "active") ?? null;
   const completed = session?.status === "completed";
   const live = session?.status === "live";
+  const voiceTalking = voice.phase === "connected" || voice.phase === "reconnecting";
+
+  useEffect(() => {
+    if (completed && voiceActive) void leaveVoice();
+  }, [completed, voiceActive, leaveVoice]);
+
+  // A dropped call wraps the session server-side; give the agent a moment, then resync.
+  useEffect(() => {
+    if (voice.phase !== "disconnected") return;
+    const id = window.setTimeout(() => {
+      refresh().catch(() => undefined);
+    }, 1500);
+    return () => window.clearTimeout(id);
+  }, [voice.phase, refresh]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -102,8 +144,13 @@ export function LiveInterview({ sessionId }: { sessionId: string }) {
     try {
       const s = await endSession(sessionId);
       setSession(s);
-      const t = await getSessionTopics(sessionId);
+      if (voiceActive) await voice.leave();
+      const [t, tr] = await Promise.all([
+        getSessionTopics(sessionId),
+        getSessionTurns(sessionId),
+      ]);
       setTopics(t);
+      setTurns(tr);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "End failed");
     } finally {
@@ -122,7 +169,7 @@ export function LiveInterview({ sessionId }: { sessionId: string }) {
             Live grill
           </h1>
           <p className="mt-2 text-[15px] text-foreground/85">
-            Text path — voice arrives later.
+            Answer out loud with voice, or type.
           </p>
         </div>
         <div className="text-right">
@@ -163,6 +210,78 @@ export function LiveInterview({ sessionId }: { sessionId: string }) {
         )}
       </div>
 
+      {live && voiceEnabled && (
+        <Card className="mb-6 shadow-none ring-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-3 text-[17px] font-semibold tracking-[-0.01em]">
+              Voice
+              <Badge
+                className={
+                  voiceTalking
+                    ? "border-transparent bg-brand-soft font-mono text-brand"
+                    : "border-transparent bg-secondary font-mono text-muted-foreground"
+                }
+              >
+                {voicePhaseLabel(voice.phase)}
+              </Badge>
+              {voiceTalking && voice.agentSpeaking && (
+                <span className="text-[13px] font-normal text-muted-foreground">
+                  Interviewer speaking — you can interrupt
+                </span>
+              )}
+            </CardTitle>
+            <CardDescription>
+              Speak your answers; the interviewer replies out loud. Leaving the call
+              ends the interview.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {voice.error && (
+              <Alert className="border-destructive/30">
+                <AlertDescription>{voice.error}</AlertDescription>
+              </Alert>
+            )}
+            <div className="flex flex-wrap gap-3">
+              {canJoinVoice({
+                sessionStatus: session?.status,
+                voiceEnabled,
+                phase: voice.phase,
+              }) && (
+                <Button
+                  type="button"
+                  onClick={() => void voice.join()}
+                  className="rounded-lg bg-brand font-semibold text-white hover:bg-brand/90"
+                >
+                  Join voice
+                </Button>
+              )}
+              {voiceTalking && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void voice.toggleMute()}
+                  className="rounded-full"
+                  aria-pressed={voice.muted}
+                >
+                  {voice.muted ? "Unmute mic" : "Mute mic"}
+                </Button>
+              )}
+              {voiceTalking && voice.audioBlocked && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void voice.unlockAudio()}
+                  className="rounded-full"
+                >
+                  Enable audio
+                </Button>
+              )}
+            </div>
+            <div ref={voice.audioHostRef} className="hidden" aria-hidden />
+          </CardContent>
+        </Card>
+      )}
+
       <Card className="mb-6 shadow-none ring-border">
         <CardHeader>
           <CardTitle className="text-[17px] font-semibold tracking-[-0.01em]">
@@ -189,7 +308,7 @@ export function LiveInterview({ sessionId }: { sessionId: string }) {
                   {turn.role === "agent" ? "Agent" : "You"}
                 </span>
                 <p className="text-[15px] leading-relaxed text-foreground">
-                  {turn.raw_text}
+                  {displayTurnText(turn)}
                 </p>
               </div>
               <Separator />
@@ -198,7 +317,19 @@ export function LiveInterview({ sessionId }: { sessionId: string }) {
         </CardContent>
       </Card>
 
-      {live && (
+      {live && voiceActive && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onEnd}
+          disabled={busy}
+          className="rounded-full"
+        >
+          End interview
+        </Button>
+      )}
+
+      {live && !voiceActive && (
         <form onSubmit={onSubmit} className="space-y-4">
           <Textarea
             value={draft}
@@ -230,23 +361,15 @@ export function LiveInterview({ sessionId }: { sessionId: string }) {
       )}
 
       {completed && (
-        <Card className="shadow-none ring-border">
-          <CardHeader>
-            <CardTitle className="text-[17px] font-semibold">Session complete</CardTitle>
-            <CardDescription>
-              Scoring and debrief come in later phases. You can start another prep
-              from home.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Link
-              href="/"
-              className="inline-flex h-8 items-center rounded-full border border-border px-4 text-sm font-medium text-foreground hover:bg-muted"
-            >
-              Back to prep
-            </Link>
-          </CardContent>
-        </Card>
+        <div className="space-y-6">
+          <SessionResults sessionId={sessionId} />
+          <Link
+            href="/"
+            className="inline-flex h-8 items-center rounded-full border border-border px-4 text-sm font-medium text-foreground hover:bg-muted"
+          >
+            Back to prep
+          </Link>
+        </div>
       )}
     </div>
   );

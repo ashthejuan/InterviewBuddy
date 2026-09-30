@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.services.grill_policy import (
+    apply_score_signal,
     looks_like_idk,
     pick_next_topic,
     should_exit_topic,
@@ -143,3 +144,49 @@ def test_stub_question_varies_by_mode() -> None:
     assert "reduced latency" in direct.lower()
     assert "example" in escalate.lower() or "concrete" in escalate.lower()
     assert parallel != direct
+
+
+def _apply(exit_: bool, reason: str, signal: str | None, **kw):
+    args = {
+        "seconds_spent": 60, "soft_cap": 210, "followups_used": 0, "max_followups": 2,
+        "topics_left": 2, "time_left_seconds": 900,
+    }
+    args.update(kw)
+    return apply_score_signal(exit_, reason, signal=signal, **args)
+
+
+def test_score_signal_never_overrides_idk_or_hard_cap() -> None:
+    assert _apply(True, "idk", "probe") == (True, "idk", None)
+    assert _apply(True, "hard_cap", "deepen") == (True, "hard_cap", None)
+
+
+def test_probe_grants_one_extra_followup() -> None:
+    assert _apply(True, "followups_exhausted", "probe", followups_used=2) == (False, "", "probe")
+    assert _apply(True, "coverage_pressure", "probe") == (False, "", "probe")
+    # Budget + 1 already used → probing stops
+    assert _apply(True, "followups_exhausted", "probe", followups_used=3)[0] is True
+
+
+def test_deepen_respects_breadth_and_soft_time() -> None:
+    assert _apply(False, "", "deepen") == (False, "", "deepen")
+    assert _apply(True, "followups_exhausted", "deepen", followups_used=2) == (False, "", "deepen")
+    assert _apply(True, "followups_exhausted", "deepen", followups_used=2, seconds_spent=220)[0]
+    assert _apply(True, "coverage_pressure", "deepen") == (True, "coverage_pressure", None)
+
+
+def test_scorable_rotates_only_under_time_pressure() -> None:
+    assert _apply(False, "", "scorable") == (False, "", None)
+    assert _apply(False, "", "scorable", seconds_spent=110) == (True, "scorable", None)
+    assert _apply(False, "", "scorable", topics_left=3, time_left_seconds=800) == (
+        True, "scorable", None
+    )
+    assert _apply(False, "", "scorable", seconds_spent=110, topics_left=0)[0] is False
+
+
+def test_stub_question_directives() -> None:
+    probe = stub_question(title="t", intent="Reduced latency 40%", mode="direct",
+                          followup=True, directive="probe")
+    deepen = stub_question(title="t", intent="Postgres", mode="direct",
+                           followup=True, directive="deepen")
+    assert "evidence" in probe.lower()
+    assert "deeper" in deepen.lower()

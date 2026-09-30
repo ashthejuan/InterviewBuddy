@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app.services.grill_policy import (
+    apply_score_signal,
     looks_like_idk,
     pick_next_topic,
     should_exit_topic,
@@ -18,6 +19,7 @@ class MemTurn:
     text: str
     topic_id: str | None = None
     node_id: str | None = None
+    directive: str | None = None
 
 
 @dataclass
@@ -54,6 +56,7 @@ class MemSession:
     wrap_reason: str | None = None
     active_topic_id: str | None = None
     active_node_id: str | None = None
+    last_exit_reason: str | None = None
 
 
 def begin(session: MemSession) -> str:
@@ -76,23 +79,36 @@ def begin(session: MemSession) -> str:
     return q
 
 
-def answer(session: MemSession, text: str, *, seconds_on_topic: int) -> str | None:
+def answer(
+    session: MemSession,
+    text: str,
+    *,
+    seconds_on_topic: int,
+    signal: str | None = None,
+) -> str | None:
+    """`signal` is the rubric hint for this answer (see `grill_policy.apply_score_signal`)."""
     if session.status != "live":
-        return None
-    if session.time_left_seconds <= 0:
-        _wrap(session, "timer")
         return None
 
     topic = _topic_by_id(session, session.active_topic_id)
     node = _active_node(session)
+    if topic is not None:
+        topic.seconds_spent = seconds_on_topic
+    session.turns.append(
+        MemTurn(
+            role="user",
+            text=text,
+            topic_id=topic.id if topic else None,
+            node_id=node.id if node else None,
+        )
+    )
+
+    if session.time_left_seconds <= 0:
+        _wrap(session, "timer")
+        return None
     if topic is None or node is None:
         _wrap(session, "no_topics")
         return None
-
-    topic.seconds_spent = seconds_on_topic
-    session.turns.append(
-        MemTurn(role="user", text=text, topic_id=topic.id, node_id=node.id)
-    )
 
     idk = looks_like_idk(text)
     topics_left = len(
@@ -108,6 +124,17 @@ def answer(session: MemSession, text: str, *, seconds_on_topic: int) -> str | No
         topics_left=topics_left,
         time_left_seconds=session.time_left_seconds,
     )
+    exit_, reason, directive = apply_score_signal(
+        exit_,
+        reason,
+        signal=signal,
+        seconds_spent=topic.seconds_spent,
+        soft_cap=topic.soft_cap_seconds,
+        followups_used=node.followups_used,
+        max_followups=node.max_followups,
+        topics_left=topics_left,
+        time_left_seconds=session.time_left_seconds,
+    )
 
     if not exit_:
         node.followups_used += 1
@@ -116,12 +143,16 @@ def answer(session: MemSession, text: str, *, seconds_on_topic: int) -> str | No
             intent=node.intent,
             mode="escalate" if node.followups_used > 1 else node.question_mode,
             followup=True,
+            directive=directive,
         )
         session.turns.append(
-            MemTurn(role="agent", text=q, topic_id=topic.id, node_id=node.id)
+            MemTurn(
+                role="agent", text=q, topic_id=topic.id, node_id=node.id, directive=directive
+            )
         )
         return q
 
+    session.last_exit_reason = reason
     _close_topic(topic, node, reason=reason)
     session.active_topic_id = None
     session.active_node_id = None

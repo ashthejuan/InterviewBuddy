@@ -67,11 +67,25 @@ class TurnOut(BaseModel):
     id: uuid.UUID
     role: str
     raw_text: str
+    normalized_text: str | None = None
+    corrections: list[dict[str, Any]] = Field(default_factory=list)
     topic_id: uuid.UUID | None
     frontier_node_id: uuid.UUID | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class VoiceStatusOut(BaseModel):
+    enabled: bool
+
+
+class VoiceTokenOut(BaseModel):
+    server_url: str
+    room_name: str
+    participant_identity: str
+    token: str
+    expires_at: datetime
 
 
 class AnswerOut(BaseModel):
@@ -89,8 +103,46 @@ class TopicOut(BaseModel):
     claim_id: uuid.UUID | None
     soft_cap_seconds: int
     hard_cap_seconds: int
+    rollup_scores: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"from_attributes": True}
+
+
+HireSignal = Literal["needs_work", "mixed", "solid", "strong"]
+
+
+class EvidenceOut(BaseModel):
+    chunk_id: uuid.UUID
+    quote: str
+    source: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class TurnScoreOut(BaseModel):
+    turn_id: uuid.UUID
+    topic_id: uuid.UUID | None
+    answer: str
+    correctness: int
+    relevance: int
+    depth: int
+    structure: int
+    honesty: int
+    confidence: float | None
+    rationale: str | None
+    flags: dict[str, Any]
+    evidence: list[EvidenceOut] = Field(default_factory=list)
+
+
+class SessionResultOut(BaseModel):
+    session_id: uuid.UUID
+    overall_score: float | None
+    hire_signal: HireSignal | None
+    strengths: list[dict[str, Any]]
+    gaps: list[dict[str, Any]]
+    coverage_summary: dict[str, Any]
+    topics: list[TopicOut]
+    turn_scores: list[TurnScoreOut]
 
 
 class FrontierNodeOut(BaseModel):

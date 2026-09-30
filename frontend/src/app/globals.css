@@ -16,7 +16,7 @@
   --popover-foreground: hsl(240 4% 12%);
   --border: hsl(0 0% 90%);
   --input: hsl(0 0% 90%);
-  --ring: hsl(24 100% 50%);
+  --ring: hsl(230 85% 53%);
   --primary: hsl(240 4% 12%);
   --primary-foreground: hsl(0 0% 100%);
   --secondary: hsl(40 33% 95%);
@@ -27,8 +27,8 @@
   --radius: 0.875rem;
 
   /* ═══ Layer 2: brand tokens (ours, beside shadcn) ═══ */
-  --brand: #ff6600;
-  --brand-soft: rgba(255, 102, 0, 0.1);
+  --brand: #1f40ed;
+  --brand-soft: rgba(31, 64, 237, 0.1);
   --link: #1f40ed;
   --dark: #101321;
   --code: #111827;
@@ -40,9 +40,9 @@
   --sidebar-accent: hsl(40 20% 96%);
   --sidebar-accent-foreground: hsl(240 4% 12%);
   --sidebar-border: hsl(0 0% 90%);
-  --sidebar-ring: hsl(24 100% 50%);
+  --sidebar-ring: hsl(230 85% 53%);
 
-  --chart-1: hsl(24 100% 50%);
+  --chart-1: hsl(230 85% 53%);
   --chart-2: hsl(228 87% 53%);
   --chart-3: hsl(240 2% 53%);
   --chart-4: hsl(240 4% 12%);

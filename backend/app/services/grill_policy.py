@@ -50,6 +50,45 @@ def should_exit_topic(
     return False, ""
 
 
+def apply_score_signal(
+    exit_: bool,
+    reason: str,
+    *,
+    signal: str | None,
+    seconds_spent: int,
+    soft_cap: int,
+    followups_used: int,
+    max_followups: int,
+    topics_left: int,
+    time_left_seconds: int,
+) -> tuple[bool, str, str | None]:
+    """Let rubric output steer the frontier. Returns (exit, reason, directive).
+
+    probe    — bluff/contradiction: one evidence probe, even past the follow-up budget.
+    deepen   — shallow but on-topic: one deepen, only while breadth is on pace.
+    scorable — enough evidence + time pressure: rotate now.
+    IDK and hard cap always win.
+    """
+    if reason in ("idk", "hard_cap") or signal is None:
+        return exit_, reason, None
+    extra_ok = followups_used < max_followups + 1
+    if signal == "probe" and extra_ok:
+        return False, "", "probe"
+    if signal == "deepen":
+        if not exit_:
+            return False, "", "deepen"
+        if reason == "followups_exhausted" and extra_ok and seconds_spent < soft_cap:
+            return False, "", "deepen"
+    if signal == "scorable" and not exit_ and topics_left > 0:
+        time_pressure = (
+            seconds_spent * 2 >= soft_cap
+            or topics_left * soft_cap >= 0.75 * time_left_seconds
+        )
+        if time_pressure:
+            return True, "scorable", None
+    return exit_, reason, None
+
+
 def pick_next_topic(topics: list[dict[str, Any]]) -> dict[str, Any] | None:
     planned = [t for t in topics if t.get("status") == "planned"]
     if not planned:
@@ -66,8 +105,20 @@ def stub_question(
     intent: str | None,
     mode: str,
     followup: bool,
+    directive: str | None = None,
 ) -> str:
     subject = (intent or title).strip() or "this topic"
+    if directive == "probe":
+        return (
+            f"I want to pin that down against your resume on {subject}. "
+            "What concrete evidence backs it — the actual numbers, how you measured them, "
+            "and what you personally did?"
+        )
+    if directive == "deepen":
+        return (
+            f"Go one level deeper on {subject}: what were the key tradeoffs, "
+            "what broke along the way, and what would you do differently?"
+        )
     if followup or mode == "escalate":
         return (
             f"Can you walk me through a concrete example related to {subject}? "

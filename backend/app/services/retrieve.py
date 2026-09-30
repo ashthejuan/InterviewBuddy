@@ -61,6 +61,7 @@ async def retrieve_for_session(
                 id=c.id,
                 content=c.content,
                 parent_content=parent.content if parent else None,
+                document_id=c.document_id,
             )
         )
     return out

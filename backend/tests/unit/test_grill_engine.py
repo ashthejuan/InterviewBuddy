@@ -110,3 +110,30 @@ def test_session_timer_expiry_wraps() -> None:
     assert q is None
     assert s.status == "completed"
     assert s.wrap_reason == "timer"
+    # The late answer is still recorded (and therefore scorable)
+    assert s.turns[-1].role == "user" and s.turns[-1].text == "Anything"
+
+
+def _on_claim_topic() -> MemSession:
+    s = _session()
+    begin(s)
+    answer(s, "I don't know", seconds_on_topic=5)  # skip warmup → jd_must active
+    assert s.active_topic_id == "t-jd"
+    return s
+
+
+def test_probe_signal_asks_evidence_probe_past_followup_budget() -> None:
+    s = _on_claim_topic()
+    s.nodes[2].followups_used = 2  # budget spent → would normally rotate
+    q = answer(s, "I cut latency 90%", seconds_on_topic=60, signal="probe")
+    assert s.active_topic_id == "t-jd"
+    assert s.turns[-1].directive == "probe"
+    assert q is not None and "evidence" in q.lower()
+
+
+def test_scorable_signal_rotates_under_time_pressure() -> None:
+    s = _on_claim_topic()
+    answer(s, "Detailed, grounded answer.", seconds_on_topic=120, signal="scorable")
+    assert s.topics[2].status == "scored"
+    assert s.last_exit_reason == "scorable"
+    assert s.active_topic_id == "t-claim"

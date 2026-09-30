@@ -28,8 +28,10 @@ from app.models import (
     DocumentSection,
     FrontierNode,
     InterviewSession,
+    SessionResult,
     SessionTopic,
     Turn,
+    TurnScore,
     User,
 )
 from app.schemas import (
@@ -37,19 +39,26 @@ from app.schemas import (
     AnswerOut,
     ChunkOut,
     DocumentOut,
+    EvidenceOut,
     FrontierNodeOut,
     PasteDocumentIn,
     SectionOut,
     SessionCreate,
     SessionOut,
+    SessionResultOut,
     TopicOut,
     TurnOut,
+    TurnScoreOut,
     UserCreate,
     UserOut,
+    VoiceStatusOut,
+    VoiceTokenOut,
 )
 from app.services import grill as grill_svc
 from app.services.prep import run_extract_job
+from app.services.scorer import finalize_session_results
 from app.services.storage import StorageError, build_object_key, put_bytes
+from app.services.voice import mint_voice_grant
 from app.services.validate_upload import (
     UploadValidationError,
     validate_paste,
@@ -219,6 +228,102 @@ async def end_session(
         await db.commit()
         await db.refresh(session)
     return session
+
+
+@router.get("/sessions/{session_id}/results", response_model=SessionResultOut)
+async def get_session_results(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+) -> SessionResultOut:
+    session = await db.get(InterviewSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if session.status != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"results available after the interview ends (status={session.status})",
+        )
+    result = (
+        await db.execute(select(SessionResult).where(SessionResult.session_id == session_id))
+    ).scalar_one_or_none()
+    if result is None:
+        # Sessions completed before scoring shipped get a rollup on first read.
+        result = await finalize_session_results(db, session)
+        await db.commit()
+
+    topics = (
+        await db.execute(
+            select(SessionTopic)
+            .where(SessionTopic.session_id == session_id)
+            .order_by(SessionTopic.priority.desc(), SessionTopic.title)
+        )
+    ).scalars().all()
+    scored = (
+        await db.execute(
+            select(Turn, TurnScore)
+            .join(TurnScore, TurnScore.turn_id == Turn.id)
+            .where(Turn.session_id == session_id)
+            .options(selectinload(TurnScore.evidence))
+            .order_by(Turn.created_at, Turn.id)
+        )
+    ).all()
+    return SessionResultOut(
+        session_id=session_id,
+        overall_score=result.overall_score,
+        hire_signal=result.hire_signal,
+        strengths=result.strengths,
+        gaps=result.gaps,
+        coverage_summary=result.coverage_summary,
+        topics=[TopicOut.model_validate(t) for t in topics],
+        turn_scores=[
+            TurnScoreOut(
+                turn_id=turn.id,
+                topic_id=turn.topic_id,
+                answer=turn.normalized_text or turn.raw_text,
+                correctness=score.correctness,
+                relevance=score.relevance,
+                depth=score.depth,
+                structure=score.structure,
+                honesty=score.honesty,
+                confidence=score.confidence,
+                rationale=score.rationale,
+                flags=score.flags or {},
+                evidence=[EvidenceOut.model_validate(e) for e in score.evidence],
+            )
+            for turn, score in scored
+        ],
+    )
+
+
+@router.get("/voice/status", response_model=VoiceStatusOut)
+async def voice_status() -> VoiceStatusOut:
+    return VoiceStatusOut(enabled=get_settings().voice_enabled)
+
+
+@router.post("/sessions/{session_id}/voice/token", response_model=VoiceTokenOut)
+async def create_voice_token(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+) -> VoiceTokenOut:
+    settings = get_settings()
+    if not settings.voice_enabled:
+        raise HTTPException(status_code=503, detail="voice is not configured on this server")
+    session = await db.get(InterviewSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if session.status != "live":
+        raise HTTPException(
+            status_code=409,
+            detail=f"session not live (status={session.status}) — start the interview first",
+        )
+    grant = mint_voice_grant(session_id=session.id, user_id=session.user_id, settings=settings)
+    return VoiceTokenOut(
+        server_url=grant.server_url,
+        room_name=grant.room_name,
+        participant_identity=grant.participant_identity,
+        token=grant.token,
+        expires_at=grant.expires_at,
+    )
 
 
 @router.get("/sessions/{session_id}/topics", response_model=list[TopicOut])

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -21,6 +21,14 @@ from app.services.grill_engine import (
     end as eng_end,
 )
 from app.services.grill_questions import generate_question
+from app.services.scorer import (
+    finalize_session_results,
+    persist_turn_score,
+    refresh_topic_rollup,
+    score_answer,
+)
+from app.services.scoring import score_signal
+from app.services.transcript_correct import correct_transcript
 
 
 def _now() -> datetime:
@@ -132,10 +140,14 @@ async def _persist_mem(
     _set_grill_meta(session, meta)
 
     persisted: list[Turn] = []
-    for nt in new_turns:
+    # Explicit, strictly increasing stamps: DB now() is per-transaction, so a user turn and
+    # its agent reply would otherwise tie and sort arbitrarily.
+    stamp = _now()
+    for idx, nt in enumerate(new_turns):
         turn = Turn(
             id=uuid.uuid4(),
             session_id=session.id,
+            created_at=stamp + timedelta(microseconds=idx),
             topic_id=uuid.UUID(nt.topic_id) if nt.topic_id else None,
             frontier_node_id=uuid.UUID(nt.node_id) if nt.node_id else None,
             role=nt.role,
@@ -189,7 +201,20 @@ async def _rewrite_agent_turns(
             ),
             followup=followup,
             prior_user_answer=prior_user_answer if followup else None,
+            directive=nt.directive,
         )
+
+
+async def _last_agent_text(db: AsyncSession, session_id: uuid.UUID) -> str:
+    row = (
+        await db.execute(
+            select(Turn.raw_text)
+            .where(Turn.session_id == session_id, Turn.role == "agent")
+            .order_by(Turn.created_at.desc(), Turn.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return row or ""
 
 
 async def begin_interview(db: AsyncSession, session: InterviewSession) -> Turn | None:
@@ -221,15 +246,38 @@ async def begin_interview(db: AsyncSession, session: InterviewSession) -> Turn |
 async def submit_answer(
     db: AsyncSession, session: InterviewSession, text: str
 ) -> tuple[Turn, Turn | None]:
-    """Persist user answer + next agent turn (or wrap). Returns (user_turn, agent_turn|None)."""
+    """Persist user answer + next agent turn (or wrap). Returns (user_turn, agent_turn|None).
+
+    `text` is the raw answer (typed or STT final); grill, retrieval and scoring use the
+    lexicon-corrected form. The rubric score is computed first so its flags can steer the frontier.
+    """
     now = _now()
+    normalized, corrections = correct_transcript(text, session.lexicon)
     mem = await _load_mem(db, session)
     seconds = _topic_seconds(session, now)
+
+    scored_topic: SessionTopic | None = None
+    draft = None
+    signal = None
+    if mem.active_topic_id:
+        scored_topic = await db.get(SessionTopic, uuid.UUID(mem.active_topic_id))
+    if scored_topic is not None:
+        node = next((n for n in mem.nodes if n.id == mem.active_node_id), None)
+        draft = await score_answer(
+            db,
+            session,
+            scored_topic,
+            intent=(node.intent if node else "") or scored_topic.title,
+            question=await _last_agent_text(db, session.id),
+            answer=normalized,
+        )
+        signal = score_signal(draft, kind=scored_topic.kind)
+
     before = len(mem.turns)
-    next_q = eng_answer(mem, text, seconds_on_topic=seconds)
+    next_q = eng_answer(mem, normalized, seconds_on_topic=seconds, signal=signal)
     new_turns = mem.turns[before:]
     await _rewrite_agent_turns(
-        db, session, mem, new_turns, prior_user_answer=text
+        db, session, mem, new_turns, prior_user_answer=normalized
     )
 
     meta = _grill_meta(session)
@@ -243,21 +291,36 @@ async def submit_answer(
             meta["topic_started_at"] = now.isoformat()
         meta["active_topic_id"] = mem.active_topic_id
         meta["active_node_id"] = mem.active_node_id
+    agent_directives = [t.directive for t in new_turns if t.role == "agent"]
+    meta["last_score_signal"] = signal
+    meta["last_directive"] = agent_directives[-1] if agent_directives else None
+    meta["last_exit_reason"] = mem.last_exit_reason
     _set_grill_meta(session, meta)
 
     persisted = await _persist_mem(db, session, mem, new_turns=new_turns)
     user_turn = next(t for t in persisted if t.role == "user")
+    user_turn.raw_text = text
+    user_turn.normalized_text = normalized
+    user_turn.corrections = corrections
+    if draft is not None and scored_topic is not None:
+        persist_turn_score(db, user_turn, draft)
+        await refresh_topic_rollup(db, scored_topic)
+    if mem.status == "completed":
+        await finalize_session_results(db, session)
     agent_turns = [t for t in persisted if t.role == "agent"]
     agent_turn = agent_turns[-1] if agent_turns else None
     return user_turn, agent_turn
 
 
-async def end_interview(db: AsyncSession, session: InterviewSession) -> None:
+async def end_interview(
+    db: AsyncSession, session: InterviewSession, *, reason: str = "user_ended"
+) -> None:
     mem = await _load_mem(db, session)
     if mem.status != "completed":
-        eng_end(mem, reason="user_ended")
+        eng_end(mem, reason=reason)
     await _persist_mem(db, session, mem, new_turns=[])
     meta = _grill_meta(session)
-    meta["wrap_reason"] = mem.wrap_reason or "user_ended"
+    meta["wrap_reason"] = mem.wrap_reason or reason
     meta.pop("topic_started_at", None)
     _set_grill_meta(session, meta)
+    await finalize_session_results(db, session)

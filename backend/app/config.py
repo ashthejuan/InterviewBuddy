@@ -46,6 +46,26 @@ class Settings(BaseSettings):
     claims_backend: str = "auto"
     # auto | stub | openrouter — auto uses OpenRouter when key + resolved grill model set
     grill_backend: str = "auto"
+    # auto | heuristic | openrouter — auto uses OpenRouter when key + resolved score model set
+    score_backend: str = "auto"
+
+    # LiveKit (Cloud or self-hosted `livekit-server --dev`)
+    livekit_url: str = ""
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""
+    livekit_agent_name: str = "interviewbuddy-grill"
+    livekit_token_ttl_seconds: int = 600
+
+    # Sarvam speech. `saaras:v3-realtime` selects the realtime STT (sends lexicon keyterms).
+    sarvam_api_key: str = ""
+    sarvam_stt_model: str = "saaras:v4"
+    sarvam_tts_model: str = "bulbul:v3"
+    sarvam_tts_speaker: str = ""
+    sarvam_language: str = "en-IN"
+
+    @property
+    def voice_enabled(self) -> bool:
+        return bool(self.livekit_url and self.livekit_api_key and self.livekit_api_secret)
 
     def _resolve_llm_model(self, override: str) -> str:
         return (override or self.default_grill_model).strip()

@@ -27,6 +27,17 @@ services:
     volumes:
       - minio_data:/data
 
+  # Local media server for the voice path (dev keys: devkey / secret). Opt in:
+  #   docker compose --profile voice up -d livekit
+  livekit:
+    image: livekit/livekit-server:latest
+    profiles: ["voice"]
+    command: --dev --bind 0.0.0.0 --node-ip 127.0.0.1
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+
 volumes:
   postgres_data:
   minio_data:

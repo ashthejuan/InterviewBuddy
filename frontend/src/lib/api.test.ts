@@ -309,3 +309,82 @@ describe("getSession / getDocument / startSession", () => {
     } satisfies Partial<ApiError>);
   });
 });
+
+describe("voice", () => {
+  it("reads voice status", async () => {
+    const { getVoiceStatus } = await import("./api");
+    stubFetch((input) => {
+      expect(String(input)).toMatch(/\/voice\/status$/);
+      return new Response(JSON.stringify({ enabled: true }), { status: 200 });
+    });
+    await expect(getVoiceStatus()).resolves.toEqual({ enabled: true });
+  });
+
+  it("posts for a room token", async () => {
+    const { getVoiceToken } = await import("./api");
+    stubFetch((input, init) => {
+      expect(String(input)).toContain("/sessions/s1/voice/token");
+      expect(init?.method).toBe("POST");
+      return new Response(
+        JSON.stringify({
+          server_url: "ws://localhost:7880",
+          room_name: "ib-session-s1-abcd",
+          participant_identity: "candidate-u1",
+          token: "jwt",
+          expires_at: "2026-09-30T12:10:00Z",
+        }),
+        { status: 200 },
+      );
+    });
+    const grant = await getVoiceToken("s1");
+    expect(grant.server_url).toBe("ws://localhost:7880");
+    expect(grant.token).toBe("jwt");
+  });
+
+  it("surfaces 503 when voice is not configured", async () => {
+    const { getVoiceToken } = await import("./api");
+    stubFetch(
+      () =>
+        new Response(JSON.stringify({ detail: "voice is not configured on this server" }), {
+          status: 503,
+        }),
+    );
+    await expect(getVoiceToken("s1")).rejects.toMatchObject({ status: 503 });
+  });
+});
+
+describe("results", () => {
+  it("gets scored results for a completed session", async () => {
+    const { getSessionResults } = await import("./api");
+    stubFetch((input) => {
+      expect(String(input)).toContain("/sessions/s1/results");
+      return new Response(
+        JSON.stringify({
+          session_id: "s1",
+          overall_score: 3.2,
+          hire_signal: "solid",
+          strengths: [],
+          gaps: [{ topic_id: "t1", title: "Latency", kind: "claim", score: 1.5, reason: "weak depth" }],
+          coverage_summary: { counts: { grilled: 1, light: 0, skipped: 2 } },
+          topics: [],
+          turn_scores: [],
+        }),
+        { status: 200 },
+      );
+    });
+    const res = await getSessionResults("s1");
+    expect(res.hire_signal).toBe("solid");
+    expect(res.gaps[0].reason).toBe("weak depth");
+  });
+
+  it("surfaces 409 while the interview is still live", async () => {
+    const { getSessionResults } = await import("./api");
+    stubFetch(
+      () =>
+        new Response(JSON.stringify({ detail: "results available after the interview ends" }), {
+          status: 409,
+        }),
+    );
+    await expect(getSessionResults("s1")).rejects.toMatchObject({ status: 409 });
+  });
+});

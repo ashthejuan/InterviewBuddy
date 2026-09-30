@@ -7,6 +7,7 @@ import os
 # Force deterministic claims in e2e (no live OpenRouter dependency).
 os.environ["CLAIMS_BACKEND"] = "heuristic"
 os.environ["GRILL_BACKEND"] = "stub"
+os.environ["SCORE_BACKEND"] = "heuristic"
 
 import pytest
 from fastapi.testclient import TestClient

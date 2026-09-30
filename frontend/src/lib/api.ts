@@ -62,12 +62,77 @@ export type TopicOut = {
   claim_id: string | null;
   soft_cap_seconds: number;
   hard_cap_seconds: number;
+  rollup_scores?: TopicRollup | Record<string, never>;
+};
+
+export const RUBRIC_DIMS = [
+  "correctness",
+  "relevance",
+  "depth",
+  "structure",
+  "honesty",
+] as const;
+export type RubricDim = (typeof RUBRIC_DIMS)[number];
+export type HireSignal = "needs_work" | "mixed" | "solid" | "strong";
+export type Coverage = "grilled" | "light" | "skipped";
+
+export type TopicRollup = {
+  n_turns: number;
+  coverage: Coverage;
+  composite: number | null;
+  dims: Partial<Record<RubricDim, number>>;
+  flags: Partial<Record<"bluff" | "contradiction" | "idk", number>>;
+};
+
+export type ResultItem = {
+  topic_id: string;
+  title: string;
+  kind: string;
+  score: number | null;
+  reason: string;
+};
+
+export type TurnScoreOut = Record<RubricDim, number> & {
+  turn_id: string;
+  topic_id: string | null;
+  answer: string;
+  confidence: number | null;
+  rationale: string | null;
+  flags: Record<string, unknown>;
+  evidence: { chunk_id: string; quote: string; source: string | null }[];
+};
+
+export type SessionResultOut = {
+  session_id: string;
+  overall_score: number | null;
+  hire_signal: HireSignal | null;
+  strengths: ResultItem[];
+  gaps: ResultItem[];
+  coverage_summary: {
+    counts?: Record<Coverage, number>;
+    jd_must?: Record<Coverage, number>;
+    dims?: Partial<Record<RubricDim, number>>;
+    topics?: { topic_id: string; title: string; kind: string; coverage: Coverage }[];
+  };
+  topics: TopicOut[];
+  turn_scores: TurnScoreOut[];
+};
+
+export type TranscriptCorrection = {
+  from: string;
+  to: string;
+  method: "exact" | "alias" | "fuzzy" | string;
+  score: number;
+  start: number;
+  end: number;
 };
 
 export type TurnOut = {
   id: string;
   role: "agent" | "user" | string;
   raw_text: string;
+  normalized_text?: string | null;
+  corrections?: TranscriptCorrection[];
   topic_id: string | null;
   frontier_node_id: string | null;
   created_at: string;
@@ -170,6 +235,32 @@ export async function answerSession(
 
 export async function endSession(sessionId: string): Promise<SessionOut> {
   return api<SessionOut>(`/sessions/${sessionId}/end`, { method: "POST" });
+}
+
+export async function getSessionResults(
+  sessionId: string,
+): Promise<SessionResultOut> {
+  return api<SessionResultOut>(`/sessions/${sessionId}/results`);
+}
+
+export type VoiceStatusOut = { enabled: boolean };
+
+export type VoiceTokenOut = {
+  server_url: string;
+  room_name: string;
+  participant_identity: string;
+  token: string;
+  expires_at: string;
+};
+
+export async function getVoiceStatus(): Promise<VoiceStatusOut> {
+  return api<VoiceStatusOut>("/voice/status");
+}
+
+export async function getVoiceToken(sessionId: string): Promise<VoiceTokenOut> {
+  return api<VoiceTokenOut>(`/sessions/${sessionId}/voice/token`, {
+    method: "POST",
+  });
 }
 
 export async function getDocument(documentId: string): Promise<DocumentOut> {

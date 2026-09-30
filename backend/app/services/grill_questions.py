@@ -46,6 +46,7 @@ async def generate_question(
     mode: str,
     followup: bool,
     prior_user_answer: str | None = None,
+    directive: str | None = None,
 ) -> str:
     subject = (intent or title).strip()
     query = " ".join(
@@ -56,7 +57,7 @@ async def generate_question(
 
     if _grill_backend() != "openrouter":
         return stub_question(
-            title=title, intent=intent, mode=mode, followup=followup
+            title=title, intent=intent, mode=mode, followup=followup, directive=directive
         )
 
     settings = get_settings()
@@ -67,6 +68,7 @@ async def generate_question(
         followup=followup,
         prior_user_answer=prior_user_answer,
         evidence=evidence,
+        directive=directive,
     )
     url = settings.openrouter_base_url.rstrip("/") + "/chat/completions"
     headers = {
@@ -94,7 +96,9 @@ async def generate_question(
     except Exception as exc:  # noqa: BLE001 — fall back to stub
         log.warning("grill_llm_failed", error=str(exc))
 
-    return stub_question(title=title, intent=intent, mode=mode, followup=followup)
+    return stub_question(
+        title=title, intent=intent, mode=mode, followup=followup, directive=directive
+    )
 
 
 def _clean_question(text: str) -> str:

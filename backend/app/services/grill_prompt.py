@@ -11,6 +11,7 @@ class RetrievedChunk:
     id: uuid.UUID
     content: str
     parent_content: str | None = None
+    document_id: uuid.UUID | None = None
 
 
 def pack_evidence(chunks: list[RetrievedChunk], *, max_chars: int = 3500) -> str:
@@ -30,6 +31,15 @@ def pack_evidence(chunks: list[RetrievedChunk], *, max_chars: int = 3500) -> str
     return "\n---\n".join(parts)
 
 
+_DIRECTIVES = {
+    "probe": (
+        "the last answer looks overstated or inconsistent with the evidence — ask for the "
+        "concrete evidence (numbers, how they were measured, personal ownership) without accusing"
+    ),
+    "deepen": "the last answer was on-topic but shallow — ask one question that goes a level deeper",
+}
+
+
 def build_grill_user_prompt(
     *,
     topic_title: str,
@@ -38,15 +48,18 @@ def build_grill_user_prompt(
     followup: bool,
     prior_user_answer: str | None,
     evidence: str,
+    directive: str | None = None,
 ) -> str:
     turn = "follow-up" if followup else "primary"
     prior = prior_user_answer.strip() if prior_user_answer else "(none — opening question)"
+    steer = _DIRECTIVES.get(directive or "", "")
     return (
         f"Topic: {topic_title}\n"
         f"Intent: {intent}\n"
         f"Question mode: {mode}\n"
         f"Turn type: {turn}\n"
-        f"Candidate's last answer: {prior}\n\n"
+        + (f"Scorer directive: {steer}\n" if steer else "")
+        + f"Candidate's last answer: {prior}\n\n"
         "<<<EVIDENCE_FROM_RESUME_OR_JD>>>\n"
         f"{evidence}\n"
         "<<<END_EVIDENCE>>>\n\n"
