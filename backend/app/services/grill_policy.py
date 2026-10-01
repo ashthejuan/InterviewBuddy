@@ -17,9 +17,52 @@ _IDK_RE = re.compile(
     re.IGNORECASE,
 )
 
+_EXPERIENCE_PREFIX = re.compile(
+    r"^(hands[-\s]?on\s+)?experience\s+with\s+",
+    re.IGNORECASE,
+)
+_MUST_HAVE_PREFIX = re.compile(r"^must\s+have\s+", re.IGNORECASE)
+
+# JD bullets often start with imperatives; turn them into spoken noun phrases.
+_IMPERATIVE_GERUNDS: tuple[tuple[str, str], ...] = (
+    ("implement ", "implementing "),
+    ("integrate ", "integrating "),
+    ("own ", "owning "),
+    ("build ", "building "),
+    ("design ", "designing "),
+    ("develop ", "developing "),
+    ("create ", "creating "),
+    ("write ", "writing "),
+    ("maintain ", "maintaining "),
+    ("improve ", "improving "),
+    ("optimize ", "optimizing "),
+    ("translate ", "translating "),
+    ("extend ", "extending "),
+    ("ship ", "shipping "),
+    ("collaborate ", "collaborating "),
+    ("work with ", "working with "),
+)
+
 
 def looks_like_idk(text: str) -> bool:
     return bool(_IDK_RE.search(text.strip()))
+
+
+def humanize_topic_subject(raw: str | None) -> str:
+    """Turn JD/resume topic titles into natural spoken English subjects."""
+    s = (raw or "").strip()
+    if not s:
+        return "this area"
+    s = _EXPERIENCE_PREFIX.sub("", s).strip()
+    s = _MUST_HAVE_PREFIX.sub("", s).strip()
+    if not s:
+        return "this area"
+    low = s.lower()
+    for prefix, gerund in _IMPERATIVE_GERUNDS:
+        if low.startswith(prefix):
+            rest = s[len(prefix) :].strip()
+            return f"{gerund}{rest}".strip()
+    return s
 
 
 def should_exit_topic(
@@ -99,6 +142,23 @@ def pick_next_topic(topics: list[dict[str, Any]]) -> dict[str, Any] | None:
     return max(planned, key=lambda t: (int(t.get("priority") or 0), str(t.get("title") or "")))
 
 
+_WARMUP_OPEN = (
+    "Give me a quick intro — what have you been working on lately, "
+    "and what are you strongest at?"
+)
+_WARMUP_FOLLOWUPS = (
+    "Pick one recent project from that — what did you personally own end to end?",
+    "What was the hardest technical decision on that project, and why?",
+)
+
+# Follow-ups deepen the last answer; they must not re-ask surface ownership.
+_DEEPEN_FOLLOWUPS = (
+    "Zoom into one concrete part of what you just described — "
+    "what was hard to get right, and how did you work through it?",
+    "What tradeoff did you make there, and what evidence convinced you it was the right call?",
+)
+
+
 def stub_question(
     *,
     title: str,
@@ -106,31 +166,37 @@ def stub_question(
     mode: str,
     followup: bool,
     directive: str | None = None,
+    kind: str | None = None,
+    followup_index: int = 0,
+    prior_user_answer: str | None = None,
 ) -> str:
-    subject = (intent or title).strip() or "this topic"
+    subject = humanize_topic_subject(intent or title)
+    if kind == "warmup":
+        if directive == "probe":
+            return (
+                "I want to pin that claim down — what concrete evidence backs it, "
+                "and what did you personally do?"
+            )
+        if directive == "deepen" or followup or mode == "escalate":
+            idx = max(0, followup_index - 1) if followup_index > 0 else 0
+            return _WARMUP_FOLLOWUPS[min(idx, len(_WARMUP_FOLLOWUPS) - 1)]
+        return _WARMUP_OPEN
     if directive == "probe":
         return (
-            f"I want to pin that down against your resume on {subject}. "
+            "I want to pin that down against your resume. "
             "What concrete evidence backs it — the actual numbers, how you measured them, "
             "and what you personally did?"
         )
-    if directive == "deepen":
-        return (
-            f"Go one level deeper on {subject}: what were the key tradeoffs, "
-            "what broke along the way, and what would you do differently?"
-        )
-    if followup or mode == "escalate":
-        return (
-            f"Can you walk me through a concrete example related to {subject}? "
-            "What specifically did you own end to end?"
-        )
+    if directive == "deepen" or followup or mode == "escalate":
+        idx = max(0, followup_index - 1) if followup_index > 0 else 0
+        return _DEEPEN_FOLLOWUPS[min(idx, len(_DEEPEN_FOLLOWUPS) - 1)]
     if mode == "direct":
         return (
-            f"You mentioned {subject}. What was your specific contribution, "
-            "and how did you measure the result?"
+            f"Looking at {subject} — what's one concrete piece you owned, "
+            "and how did you know it worked?"
         )
     # parallel / default
     return (
-        f"Tell me about your experience with {subject}. "
-        "What did you work on, and what was hard about it?"
+        f"Let's talk about {subject}. "
+        "What have you shipped here, and what was hardest?"
     )

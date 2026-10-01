@@ -145,6 +145,12 @@ class SessionResultOut(BaseModel):
     turn_scores: list[TurnScoreOut]
 
 
+class TranscriptExportOut(BaseModel):
+    path: str
+    filename: str
+    session_id: uuid.UUID
+
+
 class FrontierNodeOut(BaseModel):
     id: uuid.UUID
     topic_id: uuid.UUID

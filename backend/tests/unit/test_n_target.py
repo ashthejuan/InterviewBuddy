@@ -18,5 +18,11 @@ def test_n_target_clamps_up_when_few_priorities() -> None:
 
 def test_n_target_short_session() -> None:
     n = compute_n_target(duration_minutes=10, priority_count=10)
-    # T_core ≈ 5 → N_max = 1; when N_min > N_max, use N_max
-    assert n == 1
+    # Short slots (~2.5m) so a 10m grill still covers a few topics
+    assert n >= 2
+
+
+def test_n_target_15_min_covers_several_topics() -> None:
+    n = compute_n_target(duration_minutes=15, priority_count=10)
+    # 15m was collapsing to 2 (warmup + 1) and wrapping ~6m early
+    assert n >= 4

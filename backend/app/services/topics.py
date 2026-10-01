@@ -34,13 +34,24 @@ class TopicPlan:
 
 
 def compute_n_target(*, duration_minutes: int, priority_count: int) -> int:
-    soft_cap_min = 3.5
-    t_core_min = max(5.0, float(duration_minutes) - 5.0)
+    # Short sessions use tighter slots so 15m still covers several topics.
+    soft_cap_min = 3.5 if duration_minutes >= 25 else 2.5
+    overhead = 5.0 if duration_minutes >= 25 else 2.0
+    t_core_min = max(soft_cap_min, float(duration_minutes) - overhead)
     n_max = max(1, int(t_core_min // soft_cap_min))
-    n_min = max(3, math.ceil(0.5 * n_max))
+    floor_min = 3 if duration_minutes >= 20 else 2
+    n_min = max(floor_min, math.ceil(0.5 * n_max))
     if n_min > n_max:
         return n_max
     return max(n_min, min(n_max, priority_count))
+
+
+def _caps_for(*, kind: str, duration_minutes: int) -> tuple[int, int]:
+    if kind == "warmup":
+        return 120, 180
+    if duration_minutes < 25:
+        return 150, 240
+    return 210, 330
 
 
 def plan_topics(
@@ -101,6 +112,7 @@ def plan_topics(
     topics: list[PlannedTopic] = []
     for s in chosen[:n_target]:
         mode = "direct" if s.measurable else "parallel"
+        soft, hard = _caps_for(kind=s.kind, duration_minutes=duration_minutes)
         topics.append(
             PlannedTopic(
                 title=s.title[:200],
@@ -108,6 +120,8 @@ def plan_topics(
                 priority=s.priority,
                 claim_id=s.claim_id,
                 question_mode=mode,
+                soft_cap_seconds=soft,
+                hard_cap_seconds=hard,
             )
         )
     return TopicPlan(n_target=n_target, topics=topics)

@@ -11,6 +11,13 @@ describe("secondsRemaining", () => {
     const now = Date.parse("2026-09-29T12:10:00Z");
     expect(secondsRemaining("2026-09-29T12:05:00Z", now)).toBe(0);
   });
+
+  it("freezes when clockMs is provided (completed sessions)", () => {
+    const ends = "2026-09-29T12:15:00Z";
+    const completedAt = Date.parse("2026-09-29T12:06:00Z");
+    const later = Date.parse("2026-09-29T12:10:00Z");
+    expect(secondsRemaining(ends, later, completedAt)).toBe(540);
+  });
 });
 
 describe("formatCountdown", () => {

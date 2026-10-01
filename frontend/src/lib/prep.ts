@@ -25,3 +25,20 @@ export function prepLabel(status: SessionStatus): string {
       return "Interview completed";
   }
 }
+
+/** Show Prepare / Re-prepare only before first prep or after failure. */
+export function showPrepareAction(status: SessionStatus | null): boolean {
+  return status === null || status === "failed";
+}
+
+export function prepareActionLabel(status: SessionStatus | null): string {
+  return status === "failed" ? "Re-prepare" : "Prepare session";
+}
+
+/** True while uploads/create are in flight or backend is still preparing. */
+export function isPrepInFlight(
+  status: SessionStatus | null,
+  busy: boolean,
+): boolean {
+  return busy || status === "preparing";
+}

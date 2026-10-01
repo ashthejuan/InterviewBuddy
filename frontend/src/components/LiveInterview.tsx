@@ -44,6 +44,7 @@ export function LiveInterview({ sessionId }: { sessionId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [frozenAtMs, setFrozenAtMs] = useState<number | null>(null);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const voice = useVoiceRoom(sessionId);
   const voiceActive = isVoiceActive(voice.phase);
@@ -77,9 +78,14 @@ export function LiveInterview({ sessionId }: { sessionId: string }) {
   }, [refresh]);
 
   useEffect(() => {
+    if (session?.status === "completed") {
+      setFrozenAtMs((prev) => prev ?? Date.now());
+      return;
+    }
+    setFrozenAtMs(null);
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [session?.status]);
 
   useEffect(() => {
     getVoiceStatus()
@@ -96,7 +102,7 @@ export function LiveInterview({ sessionId }: { sessionId: string }) {
     return () => window.clearInterval(id);
   }, [voiceActive, refresh]);
 
-  const remaining = secondsRemaining(session?.ends_at ?? null, nowMs);
+  const remaining = secondsRemaining(session?.ends_at ?? null, nowMs, frozenAtMs);
   const activeTopic = topics.find((t) => t.status === "active") ?? null;
   const completed = session?.status === "completed";
   const live = session?.status === "live";
@@ -177,7 +183,7 @@ export function LiveInterview({ sessionId }: { sessionId: string }) {
             {formatCountdown(remaining)}
           </p>
           <p className="text-[12px] uppercase tracking-[0.12em] text-muted-foreground">
-            remaining
+            {completed ? "at wrap" : "remaining"}
           </p>
         </div>
       </header>

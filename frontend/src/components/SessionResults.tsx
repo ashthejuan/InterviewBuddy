@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   ApiError,
   RUBRIC_DIMS,
+  exportSessionTranscript,
   getSessionResults,
   type HireSignal,
   type ResultItem,
@@ -12,6 +13,7 @@ import {
 } from "@/lib/api";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -57,6 +59,11 @@ function ItemList({ title, items }: { title: string; items: ResultItem[] }) {
       <ul className="space-y-1.5">
         {items.map((it) => (
           <li key={`${title}-${it.topic_id}`} className="text-[15px] text-foreground">
+            {it.severity === "major" && (
+              <Badge variant="destructive" className="mr-2 align-middle">
+                Major
+              </Badge>
+            )}
             <span className="font-medium">{it.title}</span>
             <span className="text-muted-foreground"> — {it.reason}</span>
           </li>
@@ -69,6 +76,9 @@ function ItemList({ title, items }: { title: string; items: ResultItem[] }) {
 export function SessionResults({ sessionId }: { sessionId: string }) {
   const [result, setResult] = useState<SessionResultOut | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const [exportErr, setExportErr] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,6 +91,21 @@ export function SessionResults({ sessionId }: { sessionId: string }) {
       cancelled = true;
     };
   }, [sessionId]);
+
+  async function onExport() {
+    if (exportBusy) return;
+    setExportBusy(true);
+    setExportErr(null);
+    setExportMsg(null);
+    try {
+      const out = await exportSessionTranscript(sessionId);
+      setExportMsg(`Saved ${out.filename} to interview_logs/`);
+    } catch (err) {
+      setExportErr(err instanceof ApiError ? err.message : "Export failed");
+    } finally {
+      setExportBusy(false);
+    }
+  }
 
   if (error) {
     return (
@@ -152,6 +177,20 @@ export function SessionResults({ sessionId }: { sessionId: string }) {
               </div>
             );
           })}
+        </div>
+
+        <div className="space-y-2 border-t border-border pt-4">
+          <Button type="button" variant="outline" disabled={exportBusy} onClick={onExport}>
+            {exportBusy ? "Exporting…" : "Export transcript JSON"}
+          </Button>
+          {exportMsg && (
+            <p className="font-mono text-[13px] text-link">{exportMsg}</p>
+          )}
+          {exportErr && (
+            <Alert className="border-destructive/30">
+              <AlertDescription>{exportErr}</AlertDescription>
+            </Alert>
+          )}
         </div>
       </CardContent>
     </Card>

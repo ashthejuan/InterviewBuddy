@@ -16,6 +16,7 @@ from app.services.scoring import (
     heuristic_score,
     hire_signal,
     parse_score_json,
+    recycled_topics,
     rollup_session,
     rollup_topic,
     score_signal,
@@ -162,7 +163,9 @@ def test_rollup_topic_coverage_labels() -> None:
     assert rollup_topic([_st(3)], status="scored")["coverage"] == "light"
     grilled = rollup_topic([_st(3), _st(4)], status="scored")
     assert grilled["coverage"] == "grilled"
-    assert grilled["composite"] == pytest.approx(3.5, abs=0.01)
+    # 0.6 * mean(3, 4) + 0.4 * weakest(3)
+    assert grilled["composite"] == pytest.approx(3.3, abs=0.01)
+    assert grilled["rubric_version"] == "v2"
     assert rollup_topic([_st(1, idk=True)], status="skipped")["coverage"] == "skipped"
 
 
@@ -196,9 +199,150 @@ def test_rollup_session_gaps_and_no_scores() -> None:
     assert rollup_session([])["hire_signal"] is None
 
 
-def test_hire_signal_bands_and_bluff_downgrade() -> None:
+def test_hire_signal_bands_and_gates() -> None:
     assert hire_signal(1.0) == "needs_work"
     assert hire_signal(2.5) == "mixed"
-    assert hire_signal(3.4) == "solid"
+    assert hire_signal(3.9) == "solid"
     assert hire_signal(4.2) == "strong"
-    assert hire_signal(4.2, bluff_topics=2) == "solid"
+    # Any gap or integrity flag blocks "strong"
+    assert hire_signal(4.2, integrity_topics=1) == "solid"
+    assert hire_signal(4.2, minor_gaps=1) == "solid"
+    assert hire_signal(4.2, major_gaps=1) == "solid"
+    # Repeated integrity issues or major gaps cap at "mixed"
+    assert hire_signal(4.2, integrity_topics=2) == "mixed"
+    assert hire_signal(4.2, major_gaps=2) == "mixed"
+    # Gates never raise a band
+    assert hire_signal(1.0, major_gaps=3) == "needs_work"
+
+
+def test_vague_answer_is_flagged_and_capped() -> None:
+    d = heuristic_score(
+        question=QUESTION,
+        answer=(
+            "I implemented some Redis caching on the billing API and it was a huge win. "
+            "The system just felt faster and the metrics looked great after deploying it, "
+            "and the results spoke for themselves across the whole team."
+        ),
+        evidence=[CHUNK],
+    )
+    assert d.flags.get("vague") is True
+    assert d.depth <= 2 and d.honesty <= 3
+    assert composite(d.dims(), vague=True) <= 2.25
+    assert score_signal(d, kind="jd_must") == "deepen"
+
+
+def test_single_hedge_is_not_vague() -> None:
+    d = heuristic_score(
+        question=QUESTION,
+        answer=(
+            "I profiled the billing API, maybe the hottest path, then added Redis caching for "
+            "pricing lookups, which meant 40% lower p99 measured in Grafana over two weeks."
+        ),
+        evidence=[CHUNK],
+    )
+    assert "vague" not in d.flags
+
+
+def test_parse_score_json_accepts_vague_flag() -> None:
+    raw = json.dumps(
+        {"correctness": 2, "relevance": 3, "depth": 2, "structure": 3, "honesty": 2,
+         "flags": {"vague": True}}
+    )
+    assert parse_score_json(raw, answer="it felt faster", evidence=[CHUNK]).flags == {"vague": True}
+
+
+def test_collapse_under_followup_drags_topic_down() -> None:
+    polished, collapsed = _st(5), _st(2)
+    r = rollup_topic([polished, collapsed], status="scored")
+    assert r["flags"]["collapse"] == 1
+    # mean 3.5 → 0.6*3.5 + 0.4*2 = 2.9
+    assert r["composite"] == pytest.approx(2.9, abs=0.01)
+    # Weak-then-strong is improvement, not collapse
+    assert "collapse" not in rollup_topic([_st(2), _st(5)], status="scored")["flags"]
+    # Honest IDK follow-ups are not collapses
+    assert "collapse" not in rollup_topic([_st(5), _st(1, idk=True)], status="scored")["flags"]
+
+
+def test_integrity_flag_caps_whole_topic() -> None:
+    r = rollup_topic([_st(5), _st(5, contradiction=True), _st(5)], status="scored")
+    assert r["composite"] <= 2.5
+    assert r["flags"]["contradiction"] == 1
+
+
+def test_recycled_topics_detects_reused_story() -> None:
+    story = (
+        "At LeafHealth I owned the patient intake flows in Next.js with TypeScript, React Hook "
+        "Form and Zod validation, and Storybook primitives adopted across three applications, "
+        "cutting form completion time about 25 percent via progressive disclosure."
+    )
+    other = (
+        "At Campus Clubs Portal I integrated REST endpoints with JWT auth, added skeleton loaders "
+        "and retry banners for failed fetches, and raised Lighthouse accessibility from 72 to 94."
+    )
+    out = recycled_topics([("a", story), ("b", other), ("c", story + " It was hard.")])
+    assert out == {"c"}
+    assert recycled_topics([("a", "short"), ("b", "short")]) == set()
+
+
+def _row(tid: str, kind: str, rollup: dict, recycled: bool = False) -> TopicRollupRow:
+    return TopicRollupRow(tid, tid, kind, "scored", rollup, recycled=recycled)
+
+
+def test_interview_2_shape_is_not_strong() -> None:
+    """Junior run: polished answers, one collapse, one recycled topic, one must never answered."""
+    rows = [
+        _row("warm", "warmup", rollup_topic([_st(4), _st(4)], status="scored")),
+        _row("stack", "jd_must", rollup_topic([_st(4)], status="scored")),
+        _row("ui", "jd_must", rollup_topic([_st(5), _st(2), _st(5)], status="scored")),
+        _row("own", "jd_must", rollup_topic([_st(4), _st(5), _st(4)], status="scored"),
+             recycled=True),
+        TopicRollupRow("rest", "REST", "jd_must", "scored", rollup_topic([], status="scored")),
+    ]
+    out = rollup_session(rows)
+    gaps = {g["topic_id"]: g for g in out["gaps"]}
+    assert gaps["ui"]["severity"] == "major" and "collapsed" in gaps["ui"]["reason"]
+    assert gaps["own"]["severity"] == "minor" and "reused" in gaps["own"]["reason"]
+    assert gaps["rest"]["reason"] == "not covered"
+    assert "lightly" in gaps["stack"]["reason"]
+    assert out["strengths"] == []
+    assert out["hire_signal"] == "solid"
+
+
+def test_interview_3_shape_is_mixed() -> None:
+    """Mid run: bluff on one topic, vague performance answers, collapse on ownership."""
+    rows = [
+        _row("warm", "warmup", rollup_topic([_st(4), _st(4)], status="scored")),
+        _row("e2e", "jd_must", rollup_topic([_st(5), _st(2)], status="scored")),
+        _row("stack", "jd_must", rollup_topic([_st(5)], status="scored"), recycled=True),
+        _row("perf", "jd_must",
+             rollup_topic([_st(4, vague=True), _st(3, vague=True)], status="scored")),
+        _row("obs", "jd_must", rollup_topic([_st(5), _st(5, bluff=True)], status="scored")),
+    ]
+    out = rollup_session(rows)
+    gaps = {g["topic_id"]: g for g in out["gaps"]}
+    assert "overstated" in gaps["obs"]["reason"]
+    assert "vague" in gaps["perf"]["reason"]
+    assert "collapsed" in gaps["e2e"]["reason"]
+    assert out["hire_signal"] == "mixed"
+    assert out["strengths"] == []
+
+
+def test_clean_strong_run_stays_strong() -> None:
+    rows = [
+        _row("warm", "warmup", rollup_topic([_st(4), _st(4)], status="scored")),
+        _row("a", "jd_must", rollup_topic([_st(5), _st(4)], status="scored")),
+        _row("b", "jd_must", rollup_topic([_st(4), _st(5)], status="scored")),
+    ]
+    out = rollup_session(rows)
+    assert out["gaps"] == []
+    assert out["hire_signal"] == "strong"
+    assert {s["topic_id"] for s in out["strengths"]} == {"a", "b"}
+
+
+def test_integrity_penalty_scales_overall() -> None:
+    clean = rollup_session([_row("a", "claim", rollup_topic([_st(4), _st(4)], status="scored"))])
+    bluffed = rollup_session([
+        _row("a", "claim", rollup_topic([_st(4), _st(4)], status="scored")),
+        _row("b", "claim", rollup_topic([_st(4), _st(4, bluff=True)], status="scored")),
+    ])
+    assert bluffed["overall_score"] < clean["overall_score"] * 0.9

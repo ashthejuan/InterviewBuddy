@@ -47,6 +47,7 @@ from app.schemas import (
     SessionOut,
     SessionResultOut,
     TopicOut,
+    TranscriptExportOut,
     TurnOut,
     TurnScoreOut,
     UserCreate,
@@ -55,6 +56,7 @@ from app.schemas import (
     VoiceTokenOut,
 )
 from app.services import grill as grill_svc
+from app.services.export_transcript import build_export_payload, write_transcript_json
 from app.services.prep import run_extract_job
 from app.services.scorer import finalize_session_results
 from app.services.storage import StorageError, build_object_key, put_bytes
@@ -292,6 +294,90 @@ async def get_session_results(
             )
             for turn, score in scored
         ],
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/export",
+    response_model=TranscriptExportOut,
+)
+async def export_session_transcript(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+) -> TranscriptExportOut:
+    """Write transcript (+ results if present) to repo `interview_logs/interview_N.json`."""
+    session = await db.get(InterviewSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if session.status != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"export available after the interview ends (status={session.status})",
+        )
+
+    turns = (
+        await db.execute(
+            select(Turn)
+            .where(Turn.session_id == session_id)
+            .order_by(Turn.created_at, Turn.id)
+        )
+    ).scalars().all()
+    topics = (
+        await db.execute(
+            select(SessionTopic)
+            .where(SessionTopic.session_id == session_id)
+            .order_by(SessionTopic.priority.desc(), SessionTopic.title)
+        )
+    ).scalars().all()
+    result = (
+        await db.execute(select(SessionResult).where(SessionResult.session_id == session_id))
+    ).scalar_one_or_none()
+
+    results_payload = None
+    if result is not None:
+        results_payload = {
+            "overall_score": result.overall_score,
+            "hire_signal": result.hire_signal,
+            "strengths": result.strengths,
+            "gaps": result.gaps,
+            "coverage_summary": result.coverage_summary,
+        }
+
+    payload = build_export_payload(
+        session_id=str(session.id),
+        status=session.status,
+        settings=session.settings or {},
+        started_at=session.started_at,
+        ends_at=session.ends_at,
+        topics=[
+            {
+                "id": str(t.id),
+                "title": t.title,
+                "kind": t.kind,
+                "status": t.status,
+                "priority": t.priority,
+                "rollup_scores": t.rollup_scores or {},
+            }
+            for t in topics
+        ],
+        turns=[
+            {
+                "id": str(t.id),
+                "role": t.role,
+                "text": t.normalized_text or t.raw_text,
+                "raw_text": t.raw_text,
+                "topic_id": str(t.topic_id) if t.topic_id else None,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+            }
+            for t in turns
+        ],
+        results=results_payload,
+    )
+    path = write_transcript_json(payload)
+    return TranscriptExportOut(
+        path=str(path),
+        filename=path.name,
+        session_id=session_id,
     )
 
 

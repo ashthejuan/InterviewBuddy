@@ -34,3 +34,23 @@ def test_plan_topics_priority_jd_then_claims_then_behavioral() -> None:
     assert "claim" in kinds
     assert "behavioral" in kinds
     assert len(planned.topics) == planned.n_target
+
+
+def test_plan_topics_warmup_uses_short_caps() -> None:
+    planned = plan_topics(
+        duration_minutes=15,
+        jd_seeds=[
+            ClaimSeed(
+                claim_id=uuid.uuid4(),
+                title="Must have React",
+                kind="jd_must",
+                priority=100,
+                measurable=False,
+            )
+        ],
+        claim_seeds=[],
+    )
+    warmup = planned.topics[0]
+    assert warmup.kind == "warmup"
+    assert warmup.soft_cap_seconds <= 150
+    assert warmup.hard_cap_seconds <= 210

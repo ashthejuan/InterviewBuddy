@@ -164,6 +164,11 @@ async def _rebuild_claims_lexicon_topics(
         )
         db.add(topic)
         await db.flush()
+        intent = (
+            "candidate background, recent work, and strongest skills"
+            if pt.kind == "warmup"
+            else pt.title
+        )
         db.add(
             FrontierNode(
                 id=uuid.uuid4(),
@@ -171,9 +176,10 @@ async def _rebuild_claims_lexicon_topics(
                 topic_id=topic.id,
                 parent_id=None,
                 status="locked",
-                intent=pt.title,
+                intent=intent,
                 question_mode=pt.question_mode,
                 depth_level=0,
+                max_followups=1 if pt.kind == "warmup" else 2,
             )
         )
     await db.flush()

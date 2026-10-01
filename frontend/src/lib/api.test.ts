@@ -388,3 +388,23 @@ describe("results", () => {
     await expect(getSessionResults("s1")).rejects.toMatchObject({ status: 409 });
   });
 });
+
+describe("export transcript", () => {
+  it("posts export and returns filename", async () => {
+    const { exportSessionTranscript } = await import("./api");
+    stubFetch((input, init) => {
+      expect(String(input)).toContain("/sessions/s1/export");
+      expect(init?.method).toBe("POST");
+      return new Response(
+        JSON.stringify({
+          path: "/repo/interview_logs/interview_2.json",
+          filename: "interview_2.json",
+          session_id: "s1",
+        }),
+        { status: 200 },
+      );
+    });
+    const out = await exportSessionTranscript("s1");
+    expect(out.filename).toBe("interview_2.json");
+  });
+});

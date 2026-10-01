@@ -200,8 +200,10 @@ async def _rewrite_agent_turns(
                 "escalate" if node.followups_used > 1 else node.question_mode
             ),
             followup=followup,
+            followup_index=node.followups_used,
             prior_user_answer=prior_user_answer if followup else None,
             directive=nt.directive,
+            kind=topic.kind,
         )
 
 

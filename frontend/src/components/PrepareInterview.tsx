@@ -18,7 +18,13 @@ import {
   type SessionOut,
   type TopicOut,
 } from "@/lib/api";
-import { canStartInterview, prepLabel } from "@/lib/prep";
+import {
+  canStartInterview,
+  isPrepInFlight,
+  prepareActionLabel,
+  prepLabel,
+  showPrepareAction,
+} from "@/lib/prep";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -285,7 +291,10 @@ export function PrepareInterview() {
     }
   }
 
-  const ready = session ? canStartInterview(session.status) : false;
+  const status = session?.status ?? null;
+  const prepInFlight = isPrepInFlight(status, busy);
+  const ready = status ? canStartInterview(status) : false;
+  const showPrepare = showPrepareAction(status);
   const lexiconSkills = Array.isArray(session?.lexicon?.skills)
     ? (session!.lexicon.skills as string[])
     : [];
@@ -326,7 +335,7 @@ export function PrepareInterview() {
                   onValueChange={(v) => {
                     if (v != null) setDuration(Number(v));
                   }}
-                  disabled={busy}
+                  disabled={prepInFlight}
                 >
                   <SelectTrigger className="w-full bg-muted/40">
                     <SelectValue />
@@ -350,7 +359,7 @@ export function PrepareInterview() {
                   onValueChange={(v) => {
                     if (v != null) setDifficulty(v as Difficulty);
                   }}
-                  disabled={busy}
+                  disabled={prepInFlight}
                 >
                   <SelectTrigger className="w-full bg-muted/40">
                     <SelectValue />
@@ -374,7 +383,7 @@ export function PrepareInterview() {
                   onValueChange={(v) => {
                     if (v != null) setSeniority(v as Seniority);
                   }}
-                  disabled={busy}
+                  disabled={prepInFlight}
                 >
                   <SelectTrigger className="w-full bg-muted/40">
                     <SelectValue />
@@ -402,7 +411,7 @@ export function PrepareInterview() {
           paste={resumePaste}
           onPaste={setResumePaste}
           doc={resumeDoc}
-          disabled={busy}
+          disabled={prepInFlight}
         />
 
         <DocPanel
@@ -414,27 +423,36 @@ export function PrepareInterview() {
           paste={jdPaste}
           onPaste={setJdPaste}
           doc={jdDoc}
-          disabled={busy}
+          disabled={prepInFlight}
         />
 
         <div className="flex flex-wrap items-center gap-3 pt-2">
-          <Button
-            type="submit"
-            disabled={busy}
-            size="lg"
-            className="h-11 rounded-[980px] px-6 text-[15px]"
-          >
-            {busy ? "Working…" : session ? "Re-prepare" : "Prepare session"}
-          </Button>
+          {showPrepare && (
+            <Button
+              type="submit"
+              disabled={prepInFlight}
+              size="lg"
+              className="h-11 rounded-[980px] px-6 text-[15px]"
+            >
+              {prepareActionLabel(status)}
+            </Button>
+          )}
           <Button
             type="button"
             onClick={onStart}
-            disabled={!ready || busy}
+            disabled={!ready || prepInFlight}
             size="lg"
-            className="h-11 rounded-lg bg-brand px-6 text-[15px] font-semibold text-white hover:bg-brand/90"
+            className="h-11 rounded-lg bg-brand px-6 text-[15px] font-semibold text-white hover:bg-brand/90 disabled:opacity-50"
           >
             Start interview
           </Button>
+          {prepInFlight && (
+            <span
+              role="status"
+              aria-label="Preparing documents"
+              className="inline-flex h-5 w-5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-brand"
+            />
+          )}
         </div>
       </form>
 
@@ -453,20 +471,16 @@ export function PrepareInterview() {
             <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-brand">
               Prep status
             </p>
-            <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+            <div className="flex flex-wrap items-center gap-3">
               <CardTitle className="text-[22px] font-semibold tracking-[-0.01em]">
                 {prepLabel(session.status)}
               </CardTitle>
-              <span className="font-mono text-[13px] text-muted-foreground">
-                {session.id.slice(0, 8)}…
-              </span>
-              {session.n_target != null && (
-                <span className="text-sm text-foreground/85">
-                  N<sub>target</sub>{" "}
-                  <span className="font-semibold text-foreground">
-                    {session.n_target}
-                  </span>
-                </span>
+              {session.status === "preparing" && (
+                <span
+                  role="status"
+                  aria-label="Preparing documents"
+                  className="inline-flex h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-brand"
+                />
               )}
             </div>
           </CardHeader>
@@ -504,11 +518,8 @@ export function PrepareInterview() {
                 <ul>
                   {topics.map((t) => (
                     <li key={t.id}>
-                      <div className="flex items-baseline justify-between gap-4 py-3 text-[15px]">
-                        <span className="text-foreground">{t.title}</span>
-                        <span className="shrink-0 font-mono text-[12px] text-muted-foreground">
-                          {t.kind}
-                        </span>
+                      <div className="py-3 text-[15px] text-foreground">
+                        {t.title}
                       </div>
                       <Separator />
                     </li>

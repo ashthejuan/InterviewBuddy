@@ -72,6 +72,7 @@ def begin(session: MemSession) -> str:
         intent=node.intent,
         mode=node.question_mode,
         followup=False,
+        kind=topic.kind,
     )
     session.turns.append(
         MemTurn(role="agent", text=q, topic_id=topic.id, node_id=node.id)
@@ -143,7 +144,9 @@ def answer(
             intent=node.intent,
             mode="escalate" if node.followups_used > 1 else node.question_mode,
             followup=True,
+            followup_index=node.followups_used,
             directive=directive,
+            kind=topic.kind,
         )
         session.turns.append(
             MemTurn(
@@ -169,6 +172,7 @@ def answer(
         intent=nxt_node.intent,
         mode=nxt_node.question_mode,
         followup=False,
+        kind=nxt.kind,
     )
     session.turns.append(
         MemTurn(role="agent", text=q, topic_id=nxt.id, node_id=nxt_node.id)

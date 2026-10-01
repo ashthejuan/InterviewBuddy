@@ -48,7 +48,7 @@ def test_begin_activates_warmup_and_asks_first_question() -> None:
     assert s.nodes[1].status == "locked"
     assert len(s.turns) == 1
     assert s.turns[0].role == "agent"
-    assert "warmup" in q.lower() or "experience" in q.lower()
+    assert "intro" in q.lower() or "working on" in q.lower()
 
 
 def test_answer_deepens_then_rotates_after_followups() -> None:

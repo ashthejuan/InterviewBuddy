@@ -90,6 +90,7 @@ export type ResultItem = {
   kind: string;
   score: number | null;
   reason: string;
+  severity?: "major" | "minor";
 };
 
 export type TurnScoreOut = Record<RubricDim, number> & {
@@ -241,6 +242,18 @@ export async function getSessionResults(
   sessionId: string,
 ): Promise<SessionResultOut> {
   return api<SessionResultOut>(`/sessions/${sessionId}/results`);
+}
+
+export type TranscriptExportOut = {
+  path: string;
+  filename: string;
+  session_id: string;
+};
+
+export async function exportSessionTranscript(
+  sessionId: string,
+): Promise<TranscriptExportOut> {
+  return api<TranscriptExportOut>(`/sessions/${sessionId}/export`, { method: "POST" });
 }
 
 export type VoiceStatusOut = { enabled: boolean };

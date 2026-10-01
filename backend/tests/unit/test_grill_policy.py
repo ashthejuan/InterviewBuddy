@@ -129,7 +129,11 @@ def test_pick_next_topic_prefers_warmup_then_priority() -> None:
 
 def test_stub_question_varies_by_mode() -> None:
     parallel = stub_question(
-        title="Warmup intro", intent="Warmup intro", mode="parallel", followup=False
+        title="Warmup intro",
+        intent="candidate background",
+        mode="parallel",
+        followup=False,
+        kind="warmup",
     )
     direct = stub_question(
         title="Reduced latency 40%",
@@ -138,12 +142,91 @@ def test_stub_question_varies_by_mode() -> None:
         followup=False,
     )
     escalate = stub_question(
-        title="Postgres", intent="Must have Postgres", mode="escalate", followup=True
+        title="Postgres",
+        intent="Must have Postgres",
+        mode="escalate",
+        followup=True,
+        followup_index=1,
+        prior_user_answer="I owned the Postgres migration.",
     )
-    assert "experience" in parallel.lower() or "tell me" in parallel.lower()
+    assert "warmup intro" not in parallel.lower()
+    assert "intro" in parallel.lower() or "working on" in parallel.lower()
     assert "reduced latency" in direct.lower()
-    assert "example" in escalate.lower() or "concrete" in escalate.lower()
+    assert "you mentioned" not in direct.lower()
+    assert "hard" in escalate.lower() or "tradeoff" in escalate.lower()
     assert parallel != direct
+
+
+def test_stub_warmup_never_quotes_topic_title() -> None:
+    for followup, idx in ((False, 0), (True, 1), (True, 2)):
+        q = stub_question(
+            title="Warmup intro",
+            intent="Warmup intro",
+            mode="parallel",
+            followup=followup,
+            followup_index=idx,
+            kind="warmup",
+        )
+        assert "warmup intro" not in q.lower()
+        assert "experience with warmup" not in q.lower()
+
+
+def test_stub_followups_vary_by_index() -> None:
+    prior = "I built patient intake flows with React Hook Form and Zod."
+    a = stub_question(
+        title="Implement product UI in React / Next.js with TypeScript",
+        intent="Implement product UI in React / Next.js with TypeScript",
+        mode="escalate",
+        followup=True,
+        followup_index=1,
+        prior_user_answer=prior,
+    )
+    b = stub_question(
+        title="Implement product UI in React / Next.js with TypeScript",
+        intent="Implement product UI in React / Next.js with TypeScript",
+        mode="escalate",
+        followup=True,
+        followup_index=2,
+        prior_user_answer=prior,
+    )
+    assert a != b
+    assert "implement product ui" not in a.lower()
+    assert "implement product ui" not in b.lower()
+    assert "end to end" not in a.lower()
+
+
+def test_stub_opening_humanizes_jd_imperatives() -> None:
+    q = stub_question(
+        title="Own UI features in the Next.js app",
+        intent="Own UI features in the Next.js app",
+        mode="parallel",
+        followup=False,
+    )
+    assert "own ui features" not in q.lower()  # raw imperative paste
+    assert "owning ui features" in q.lower()
+    assert "experience with own" not in q.lower()
+    assert "you mentioned" not in q.lower()
+
+    tech = stub_question(
+        title="Experience with TypeScript, React, Next.js",
+        intent="Experience with TypeScript, React, Next.js",
+        mode="direct",
+        followup=False,
+    )
+    assert "you mentioned experience" not in tech.lower()
+    assert "typescript" in tech.lower()
+
+
+def test_humanize_topic_subject() -> None:
+    from app.services.grill_policy import humanize_topic_subject
+
+    assert humanize_topic_subject("Implement product UI") == "implementing product UI"
+    assert humanize_topic_subject("Own UI features in the Next.js app").startswith("owning")
+    assert humanize_topic_subject("Experience with TypeScript, React, Next.js").startswith(
+        "TypeScript"
+    )
+    assert humanize_topic_subject("Must have Postgres") == "Postgres"
+
 
 
 def _apply(exit_: bool, reason: str, signal: str | None, **kw):
@@ -187,6 +270,8 @@ def test_stub_question_directives() -> None:
     probe = stub_question(title="t", intent="Reduced latency 40%", mode="direct",
                           followup=True, directive="probe")
     deepen = stub_question(title="t", intent="Postgres", mode="direct",
-                           followup=True, directive="deepen")
+                           followup=True, directive="deepen", followup_index=1,
+                           prior_user_answer="We cut latency with caching.")
     assert "evidence" in probe.lower()
-    assert "deeper" in deepen.lower()
+    assert "hard" in deepen.lower() or "tradeoff" in deepen.lower() or "zoom" in deepen.lower()
+    assert "postgres" not in deepen.lower()
