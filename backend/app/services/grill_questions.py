@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.models import InterviewSession
 from app.services.grill_policy import stub_question
 from app.services.grill_prompt import build_grill_user_prompt, pack_evidence
+from app.services.openrouter_chat import grill_completion_options, message_text
 from app.services.retrieve import retrieve_for_session
 
 log = structlog.get_logger()
@@ -97,15 +98,14 @@ async def generate_question(
             {"role": "user", "content": user},
         ],
         "temperature": 0.4,
-        "max_tokens": 220,
+        **grill_completion_options(),
     }
     try:
         async with httpx.AsyncClient(timeout=45.0) as client:
             resp = await client.post(url, headers=headers, json=body)
             resp.raise_for_status()
             data = resp.json()
-        text = data["choices"][0]["message"]["content"].strip()
-        text = _clean_question(text)
+        text = _clean_question(message_text(data))
         if text:
             return text
     except Exception as exc:  # noqa: BLE001 — fall back to stub

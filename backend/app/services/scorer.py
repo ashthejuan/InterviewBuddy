@@ -21,6 +21,7 @@ from app.models import (
     TurnScore,
 )
 from app.services.grill_prompt import RetrievedChunk, pack_evidence
+from app.services.openrouter_chat import message_text, score_completion_options
 from app.services.retrieve import retrieve_for_session
 from app.services.scoring import (
     ScoredTurn,
@@ -161,8 +162,8 @@ async def _score_openrouter(
             },
         ],
         "temperature": 0,
-        "max_tokens": 400,
         "response_format": {"type": "json_object"},
+        **score_completion_options(),
     }
     headers = {
         "Authorization": f"Bearer {settings.openrouter_api_key}",
@@ -171,7 +172,7 @@ async def _score_openrouter(
     async with httpx.AsyncClient(timeout=45.0) as client:
         resp = await client.post(url, headers=headers, json=body)
         resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
+        content = message_text(resp.json())
     return parse_score_json(
         content, answer=answer, evidence=evidence, doc_sources=_doc_sources(session)
     )
