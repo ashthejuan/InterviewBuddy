@@ -21,6 +21,14 @@ def score_completion_options() -> dict[str, Any]:
     }
 
 
+def report_completion_options() -> dict[str, Any]:
+    """Debrief prose JSON — longer budget; reasoning off."""
+    return {
+        "max_tokens": 900,
+        "reasoning": {"effort": "none"},
+    }
+
+
 def message_text(data: dict[str, Any]) -> str:
     """Return stripped assistant content; raise if missing (e.g. reasoning ate budget)."""
     choices = data.get("choices") or []

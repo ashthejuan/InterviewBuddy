@@ -7,6 +7,7 @@ import pytest
 from app.services.openrouter_chat import (
     grill_completion_options,
     message_text,
+    report_completion_options,
     score_completion_options,
 )
 
@@ -20,6 +21,12 @@ def test_grill_disables_reasoning_and_caps_at_200() -> None:
 def test_score_disables_reasoning_and_caps_at_400() -> None:
     opts = score_completion_options()
     assert opts["max_tokens"] == 400
+    assert opts["reasoning"] == {"effort": "none"}
+
+
+def test_report_disables_reasoning_and_allows_longer_prose() -> None:
+    opts = report_completion_options()
+    assert opts["max_tokens"] == 900
     assert opts["reasoning"] == {"effort": "none"}
 
 

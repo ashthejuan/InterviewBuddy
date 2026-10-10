@@ -145,6 +145,21 @@ class SessionResultOut(BaseModel):
     turn_scores: list[TurnScoreOut]
 
 
+ReportStatus = Literal["pending", "ready", "failed"]
+
+
+class SessionReportOut(BaseModel):
+    session_id: uuid.UUID
+    status: ReportStatus
+    report_json: dict[str, Any] | None = None
+    report_markdown: str | None = None
+    r2_pdf_key: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class TranscriptExportOut(BaseModel):
     path: str
     filename: str

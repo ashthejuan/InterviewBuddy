@@ -19,6 +19,10 @@
 #                                          coverage, per-topic rollups, per-turn scores + evidence
 #   GET  /sessions/{id}/topics          — now includes rollup_scores
 #
+# Phase 6 report (REPORT_BACKEND=auto|heuristic|openrouter):
+#   GET  /sessions/{id}/report          — pending|ready|failed + report_json + report_markdown
+#   POST /sessions/{id}/report/retry    — force regenerate (background job)
+#
 # Phase 5 voice (LiveKit + Sarvam):
 #   docker compose --profile voice up -d livekit   (or point LIVEKIT_* at LiveKit Cloud)
 #   uv run python -m agent.worker download-files   (one-time: Silero VAD model)

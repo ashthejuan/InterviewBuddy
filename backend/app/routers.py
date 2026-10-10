@@ -28,6 +28,7 @@ from app.models import (
     DocumentSection,
     FrontierNode,
     InterviewSession,
+    SessionReport,
     SessionResult,
     SessionTopic,
     Turn,
@@ -45,6 +46,7 @@ from app.schemas import (
     SectionOut,
     SessionCreate,
     SessionOut,
+    SessionReportOut,
     SessionResultOut,
     TopicOut,
     TranscriptExportOut,
@@ -58,6 +60,7 @@ from app.schemas import (
 from app.services import grill as grill_svc
 from app.services.export_transcript import build_export_payload, write_transcript_json
 from app.services.prep import run_extract_job
+from app.services.report_job import ensure_report_pending, run_report_job
 from app.services.scorer import finalize_session_results
 from app.services.storage import StorageError, build_object_key, put_bytes
 from app.services.voice import mint_voice_grant
@@ -189,6 +192,7 @@ async def list_session_turns(
 async def answer_session(
     session_id: uuid.UUID,
     body: AnswerIn,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_session),
 ) -> AnswerOut:
     session = await db.get(InterviewSession, session_id)
@@ -205,6 +209,8 @@ async def answer_session(
     await db.refresh(user_turn)
     if agent_turn is not None:
         await db.refresh(agent_turn)
+    if session.status == "completed":
+        background_tasks.add_task(run_report_job, session_id)
     return AnswerOut(
         session=SessionOut.model_validate(session),
         user_turn=TurnOut.model_validate(user_turn),
@@ -215,6 +221,7 @@ async def answer_session(
 @router.post("/sessions/{session_id}/end", response_model=SessionOut)
 async def end_session(
     session_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_session),
 ) -> InterviewSession:
     session = await db.get(InterviewSession, session_id)
@@ -229,7 +236,71 @@ async def end_session(
         await grill_svc.end_interview(db, session)
         await db.commit()
         await db.refresh(session)
+        background_tasks.add_task(run_report_job, session_id)
+    elif session.status == "completed":
+        # Already wrapped (e.g. timer) — ensure a report job exists.
+        row = (
+            await db.execute(select(SessionReport).where(SessionReport.session_id == session_id))
+        ).scalar_one_or_none()
+        if row is None or row.status != "ready":
+            await ensure_report_pending(db, session_id)
+            await db.commit()
+            background_tasks.add_task(run_report_job, session_id)
     return session
+
+
+@router.get("/sessions/{session_id}/report", response_model=SessionReportOut)
+async def get_session_report(
+    session_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_session),
+) -> SessionReportOut:
+    session = await db.get(InterviewSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if session.status != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"report available after the interview ends (status={session.status})",
+        )
+    row = (
+        await db.execute(select(SessionReport).where(SessionReport.session_id == session_id))
+    ).scalar_one_or_none()
+    if row is None:
+        # Ensure results exist before assembling the report.
+        result = (
+            await db.execute(select(SessionResult).where(SessionResult.session_id == session_id))
+        ).scalar_one_or_none()
+        if result is None:
+            await finalize_session_results(db, session)
+        row = await ensure_report_pending(db, session_id)
+        await db.commit()
+        await db.refresh(row)
+        background_tasks.add_task(run_report_job, session_id)
+    elif row.status == "pending":
+        background_tasks.add_task(run_report_job, session_id)
+    return SessionReportOut.model_validate(row)
+
+
+@router.post("/sessions/{session_id}/report/retry", response_model=SessionReportOut)
+async def retry_session_report(
+    session_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_session),
+) -> SessionReportOut:
+    session = await db.get(InterviewSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if session.status != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"report available after the interview ends (status={session.status})",
+        )
+    row = await ensure_report_pending(db, session_id, force=True)
+    await db.commit()
+    await db.refresh(row)
+    background_tasks.add_task(run_report_job, session_id)
+    return SessionReportOut.model_validate(row)
 
 
 @router.get("/sessions/{session_id}/results", response_model=SessionResultOut)

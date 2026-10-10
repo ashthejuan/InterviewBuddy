@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     grill_backend: str = "auto"
     # auto | heuristic | openrouter — rubric scorer; heuristic fallback on LLM failure
     score_backend: str = "auto"
+    # auto | heuristic | openrouter — report prose; heuristic fallback on LLM failure
+    report_backend: str = "auto"
 
     # LiveKit (Cloud or self-hosted `livekit-server --dev`)
     livekit_url: str = ""

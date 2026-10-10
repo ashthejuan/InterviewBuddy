@@ -21,6 +21,7 @@ from app.services.grill_engine import (
     end as eng_end,
 )
 from app.services.grill_questions import generate_question
+from app.services.report_job import ensure_report_pending
 from app.services.scorer import (
     finalize_session_results,
     persist_turn_score,
@@ -309,6 +310,7 @@ async def submit_answer(
         await refresh_topic_rollup(db, scored_topic)
     if mem.status == "completed":
         await finalize_session_results(db, session)
+        await ensure_report_pending(db, session.id)
     agent_turns = [t for t in persisted if t.role == "agent"]
     agent_turn = agent_turns[-1] if agent_turns else None
     return user_turn, agent_turn
@@ -326,3 +328,4 @@ async def end_interview(
     meta.pop("topic_started_at", None)
     _set_grill_meta(session, meta)
     await finalize_session_results(db, session)
+    await ensure_report_pending(db, session.id)

@@ -81,6 +81,9 @@ class VoiceGrillController:
             _, agent_turn = await grill_svc.submit_answer(db, session, text)
             await db.commit()
             if session.status == "completed":
+                from app.services.report_job import schedule_report_job
+
+                schedule_report_job(session.id)
                 return VoiceReply(CLOSING_LINE, done=True)
             return VoiceReply(agent_turn.raw_text if agent_turn else None)
 
@@ -97,6 +100,9 @@ class VoiceGrillController:
             if ends is not None and now >= ends:
                 await grill_svc.end_interview(db, session, reason="timer")
                 await db.commit()
+                from app.services.report_job import schedule_report_job
+
+                schedule_report_job(session.id)
                 return VoiceReply(CLOSING_LINE, done=True)
             return None
 
@@ -107,3 +113,6 @@ class VoiceGrillController:
             if session is not None and session.status == "live":
                 await grill_svc.end_interview(db, session, reason="voice_disconnected")
                 await db.commit()
+                from app.services.report_job import schedule_report_job
+
+                schedule_report_job(session.id)

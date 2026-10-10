@@ -244,6 +244,32 @@ export async function getSessionResults(
   return api<SessionResultOut>(`/sessions/${sessionId}/results`);
 }
 
+export type ReportStatus = "pending" | "ready" | "failed";
+
+export type SessionReportOut = {
+  session_id: string;
+  status: ReportStatus;
+  report_json: Record<string, unknown> | null;
+  report_markdown: string | null;
+  r2_pdf_key: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export async function getSessionReport(
+  sessionId: string,
+): Promise<SessionReportOut> {
+  return api<SessionReportOut>(`/sessions/${sessionId}/report`);
+}
+
+export async function retrySessionReport(
+  sessionId: string,
+): Promise<SessionReportOut> {
+  return api<SessionReportOut>(`/sessions/${sessionId}/report/retry`, {
+    method: "POST",
+  });
+}
+
 export type TranscriptExportOut = {
   path: string;
   filename: string;

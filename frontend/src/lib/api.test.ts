@@ -389,6 +389,48 @@ describe("results", () => {
   });
 });
 
+describe("report", () => {
+  it("gets structured report for a completed session", async () => {
+    const { getSessionReport } = await import("./api");
+    stubFetch((input) => {
+      expect(String(input)).toContain("/sessions/s1/report");
+      return new Response(
+        JSON.stringify({
+          session_id: "s1",
+          status: "ready",
+          report_json: { schema_version: "v1" },
+          report_markdown: "# Interview debrief\n",
+          r2_pdf_key: null,
+        }),
+        { status: 200 },
+      );
+    });
+    const res = await getSessionReport("s1");
+    expect(res.status).toBe("ready");
+    expect(res.report_markdown).toContain("Interview debrief");
+  });
+
+  it("retries a failed report", async () => {
+    const { retrySessionReport } = await import("./api");
+    stubFetch((input, init) => {
+      expect(String(input)).toContain("/sessions/s1/report/retry");
+      expect(init?.method).toBe("POST");
+      return new Response(
+        JSON.stringify({
+          session_id: "s1",
+          status: "pending",
+          report_json: null,
+          report_markdown: null,
+          r2_pdf_key: null,
+        }),
+        { status: 200 },
+      );
+    });
+    const res = await retrySessionReport("s1");
+    expect(res.status).toBe("pending");
+  });
+});
+
 describe("export transcript", () => {
   it("posts export and returns filename", async () => {
     const { exportSessionTranscript } = await import("./api");
