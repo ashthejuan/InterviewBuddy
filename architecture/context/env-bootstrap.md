@@ -10,6 +10,7 @@ Root `.env` (+ commit-safe `.env.example`) with variables required by the PRD st
 ## Variables covered
 
 - App / CORS / `DEV_USER_ID` stub
+- Auth.js: `AUTH_SECRET`, `AUTH_URL` (optional `AUTH_USERS_PATH`); JWT/session cookie TTL is 6 hours in app config (not an env var)
 - Postgres + `DATABASE_URL` (asyncpg)
 - Optional `REDIS_URL`
 - Cloudflare R2 (S3-compatible; MinIO-friendly endpoint)

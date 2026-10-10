@@ -21,7 +21,12 @@
 #
 # Phase 6 report (REPORT_BACKEND=auto|heuristic|openrouter):
 #   GET  /sessions/{id}/report          — pending|ready|failed + report_json + report_markdown
+#   GET  /sessions/{id}/report.pdf      — PDF download when report status=ready
 #   POST /sessions/{id}/report/retry    — force regenerate (background job)
+#   On ready, also writes repo reports/report_N.{md,json,pdf} (gitignored)
+#   uv run python scripts/generate_sample_report.py      — fixture → reports/ (no DB)
+#   uv run python scripts/run_live_report_generation.py  — seed session → reports/ (needs Postgres)
+#   uv run python scripts/run_session_report.py <uuid>   — regenerate one session
 #
 # Phase 5 voice (LiveKit + Sarvam):
 #   docker compose --profile voice up -d livekit   (or point LIVEKIT_* at LiveKit Cloud)

@@ -129,3 +129,11 @@
 .rise-in {
   animation: rise-in 300ms ease-out both;
 }
+
+/* Auth screens: soft field behind the solid panel (AWS-style enclosure). */
+.auth-shell {
+  background:
+    radial-gradient(120% 80% at 10% 0%, var(--brand-soft), transparent 55%),
+    radial-gradient(90% 70% at 100% 100%, rgba(16, 19, 33, 0.06), transparent 50%),
+    hsl(40 24% 94%);
+}

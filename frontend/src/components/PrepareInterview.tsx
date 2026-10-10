@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { LogoutButton } from "@/components/LogoutButton";
 
 type InputMode = "file" | "paste";
 
@@ -301,10 +302,13 @@ export function PrepareInterview() {
 
   return (
     <div className="mx-auto min-h-screen max-w-[980px] px-6 pb-24 pt-16 md:px-10">
-      <header className="rise-in mb-14 max-w-[620px]">
-        <p className="mb-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-brand">
+      <div className="rise-in mb-8 flex items-center justify-between gap-4">
+        <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-brand">
           InterviewBuddy
         </p>
+        <LogoutButton />
+      </div>
+      <header className="rise-in mb-14 max-w-[620px]">
         <h1 className="mb-4 font-heading text-[40px] font-semibold leading-[1.08] tracking-[-0.022em] text-foreground md:text-[48px]">
           Prep before you grill.
         </h1>

@@ -32,6 +32,7 @@ from app.services.report import (
     ReportTurnInput,
     assemble_report,
 )
+from app.services.report_export import write_report_files
 from app.services.report_markdown import render_report_markdown
 from app.services.report_prose import fill_prose
 
@@ -251,7 +252,25 @@ async def run_report_job(session_id: uuid.UUID) -> None:
             row.report_markdown = md
             row.status = "ready"
             await db.commit()
-            log.info("report_ready", session_id=str(session_id))
+            try:
+                disk = write_report_files(
+                    report_json=filled,
+                    report_markdown=md,
+                    session_id=str(session_id),
+                )
+                log.info(
+                    "report_ready",
+                    session_id=str(session_id),
+                    markdown=str(disk.markdown),
+                    json_path=str(disk.json_path),
+                    pdf=str(disk.pdf_path),
+                )
+            except Exception as exc:  # noqa: BLE001 — DB row already ready; disk is best-effort
+                log.warning(
+                    "report_disk_write_failed",
+                    session_id=str(session_id),
+                    error=str(exc),
+                )
         except Exception as exc:  # noqa: BLE001
             log.exception("report_failed", session_id=str(session_id), error=str(exc))
             await db.rollback()

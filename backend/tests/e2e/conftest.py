@@ -8,6 +8,7 @@ import os
 os.environ["CLAIMS_BACKEND"] = "heuristic"
 os.environ["GRILL_BACKEND"] = "stub"
 os.environ["SCORE_BACKEND"] = "heuristic"
+os.environ["REPORT_BACKEND"] = "heuristic"
 
 import pytest
 from fastapi.testclient import TestClient

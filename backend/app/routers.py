@@ -16,6 +16,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,6 +62,7 @@ from app.services import grill as grill_svc
 from app.services.export_transcript import build_export_payload, write_transcript_json
 from app.services.prep import run_extract_job
 from app.services.report_job import ensure_report_pending, run_report_job
+from app.services.report_pdf import render_report_pdf
 from app.services.scorer import finalize_session_results
 from app.services.storage import StorageError, build_object_key, put_bytes
 from app.services.voice import mint_voice_grant
@@ -301,6 +303,36 @@ async def retry_session_report(
     await db.refresh(row)
     background_tasks.add_task(run_report_job, session_id)
     return SessionReportOut.model_validate(row)
+
+
+@router.get("/sessions/{session_id}/report.pdf")
+async def download_session_report_pdf(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+) -> Response:
+    session = await db.get(InterviewSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if session.status != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"report available after the interview ends (status={session.status})",
+        )
+    row = (
+        await db.execute(select(SessionReport).where(SessionReport.session_id == session_id))
+    ).scalar_one_or_none()
+    if row is None or row.status != "ready" or not row.report_markdown:
+        raise HTTPException(
+            status_code=409,
+            detail=f"report PDF available when status=ready (status={row.status if row else 'missing'})",
+        )
+    pdf = render_report_pdf(row.report_markdown)
+    filename = f"interview-report-{str(session_id)[:8]}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/sessions/{session_id}/results", response_model=SessionResultOut)

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { CSSProperties, ReactNode } from "react";
 import { Inter, JetBrains_Mono } from "next/font/google";
+import { SessionProvider } from "@/components/SessionProvider";
 import { cn } from "@/lib/utils";
 import "./globals.css";
 
@@ -31,7 +32,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={cn(inter.variable, mono.variable)} style={displayFontStyle}>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <SessionProvider>{children}</SessionProvider>
+      </body>
     </html>
   );
 }
