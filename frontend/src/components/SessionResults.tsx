@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   ApiError,
   RUBRIC_DIMS,
+  downloadSessionReportPdf,
   exportSessionTranscript,
   getSessionReport,
   getSessionResults,
@@ -111,6 +112,7 @@ export function SessionResults({ sessionId }: { sessionId: string }) {
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [exportErr, setExportErr] = useState<string | null>(null);
   const [retryBusy, setRetryBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const [pollToken, setPollToken] = useState(0);
 
   useEffect(() => {
@@ -179,6 +181,19 @@ export function SessionResults({ sessionId }: { sessionId: string }) {
       setReportErr(err instanceof ApiError ? err.message : "Retry failed");
     } finally {
       setRetryBusy(false);
+    }
+  }
+
+  async function onDownloadPdf() {
+    if (pdfBusy || report?.status !== "ready") return;
+    setPdfBusy(true);
+    setReportErr(null);
+    try {
+      await downloadSessionReportPdf(sessionId);
+    } catch (err) {
+      setReportErr(err instanceof ApiError ? err.message : "PDF download failed");
+    } finally {
+      setPdfBusy(false);
     }
   }
 
@@ -317,6 +332,14 @@ export function SessionResults({ sessionId }: { sessionId: string }) {
               }
             >
               Download report (.md)
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pdfBusy || report?.status !== "ready"}
+              onClick={onDownloadPdf}
+            >
+              {pdfBusy ? "Preparing PDF…" : "Download report (.pdf)"}
             </Button>
             <Button type="button" variant="outline" disabled={exportBusy} onClick={onExport}>
               {exportBusy ? "Exporting…" : "Export transcript JSON"}

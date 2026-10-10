@@ -270,6 +270,22 @@ export async function retrySessionReport(
   });
 }
 
+export async function downloadSessionReportPdf(sessionId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}/report.pdf`, {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readError(res));
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `interview-report-${sessionId.slice(0, 8)}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export type TranscriptExportOut = {
   path: string;
   filename: string;

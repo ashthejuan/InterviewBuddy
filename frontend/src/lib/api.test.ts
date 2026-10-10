@@ -429,6 +429,38 @@ describe("report", () => {
     const res = await retrySessionReport("s1");
     expect(res.status).toBe("pending");
   });
+
+  it("downloads report pdf as a blob file", async () => {
+    const { downloadSessionReportPdf } = await import("./api");
+    const clicks: string[] = [];
+    const anchor = {
+      href: "",
+      download: "",
+      click: () => {
+        clicks.push(anchor.download);
+      },
+    };
+    vi.stubGlobal("document", {
+      createElement: (tag: string) => {
+        expect(tag).toBe("a");
+        return anchor;
+      },
+    });
+    vi.stubGlobal("URL", {
+      createObjectURL: () => "blob:pdf",
+      revokeObjectURL: () => undefined,
+    });
+    stubFetch((input) => {
+      expect(String(input)).toContain("/sessions/s1/report.pdf");
+      return new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]), {
+        status: 200,
+        headers: { "Content-Type": "application/pdf" },
+      });
+    });
+    await downloadSessionReportPdf("s1");
+    expect(clicks[0]).toBe("interview-report-s1.pdf");
+    expect(anchor.href).toBe("blob:pdf");
+  });
 });
 
 describe("export transcript", () => {
