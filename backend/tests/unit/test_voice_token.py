@@ -47,7 +47,7 @@ def test_grant_scopes_token_to_one_room_and_dispatches_agent() -> None:
     assert claims.identity == grant.participant_identity
     assert claims.video.room_join is True
     assert claims.video.room == grant.room_name
-    assert claims.video.can_publish_data is False
+    assert claims.video.can_publish_data is True
     assert claims.video.can_publish_sources == ["microphone"]
     assert claims.video.room_admin is not True
 

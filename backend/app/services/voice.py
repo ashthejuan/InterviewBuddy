@@ -57,7 +57,8 @@ def mint_voice_grant(
                 room=room,
                 can_publish=True,
                 can_subscribe=True,
-                can_publish_data=False,
+                # RPC to the agent (Submit / Clear answer) rides the data channel.
+                can_publish_data=True,
                 can_publish_sources=["microphone"],
             )
         )

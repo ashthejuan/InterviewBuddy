@@ -8,6 +8,7 @@ so LiveKit only owns transport, VAD, turn-taking and barge-in.
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import structlog
@@ -47,6 +48,18 @@ log = structlog.get_logger()
 
 SARVAM_REALTIME_MODEL = "saaras:v3-realtime"
 TIMER_POLL_SECONDS = 5.0
+# Plugin 1.8.3 defaults to "anushka" for non-v3 models, which Bulbul v4 rejects (422).
+BULBUL_V4_DEFAULT_SPEAKER = "simran_en_conversation"
+RPC_SUBMIT_ANSWER = "submit_answer"
+RPC_CLEAR_ANSWER = "clear_answer"
+# Sarvam batch STT can lag a few seconds behind the click on long answers.
+SUBMIT_TRANSCRIPT_TIMEOUT = 8.0
+# The candidate decides when an answer is done; questions play to the end.
+TURN_HANDLING = {
+    "turn_detection": "manual",
+    "interruption": {"enabled": False},
+    "preemptive_generation": {"enabled": False},
+}
 
 
 def build_stt(settings: Settings, keyterms: list[str]) -> stt.STT:
@@ -68,6 +81,8 @@ def build_tts(settings: Settings) -> tts.TTS:
     kwargs: dict[str, str] = {}
     if settings.sarvam_tts_speaker:
         kwargs["speaker"] = settings.sarvam_tts_speaker
+    elif model.startswith("bulbul:v4"):
+        kwargs["speaker"] = BULBUL_V4_DEFAULT_SPEAKER
     return sarvam.TTS(
         target_language_code=settings.sarvam_language,
         model=model,
@@ -78,10 +93,32 @@ def build_tts(settings: Settings) -> tts.TTS:
 
 def speak(session: AgentSession, reply: VoiceReply) -> None:
     if reply.text:
-        # The closing line is not interruptible so the candidate hears the wrap.
-        session.say(reply.text, allow_interruptions=not reply.done)
+        session.say(reply.text, allow_interruptions=False)
     if reply.done:
         session.shutdown(drain=True)
+
+
+def register_answer_rpcs(room: rtc.Room, session: AgentSession) -> None:
+    """Candidate-driven turn end: the UI's Submit/Clear buttons call these."""
+
+    def _check_caller(data: rtc.RpcInvocationData) -> None:
+        if not data.caller_identity.startswith(CANDIDATE_PREFIX):
+            raise rtc.RpcError(rtc.RpcError.ErrorCode.APPLICATION_ERROR, "not the candidate")
+
+    async def submit_answer(data: rtc.RpcInvocationData) -> str:
+        _check_caller(data)
+        transcript = await session.commit_user_turn(
+            transcript_timeout=SUBMIT_TRANSCRIPT_TIMEOUT
+        )
+        return json.dumps({"transcript": transcript or ""})
+
+    async def clear_answer(data: rtc.RpcInvocationData) -> str:
+        _check_caller(data)
+        session.clear_user_turn()
+        return "ok"
+
+    room.local_participant.register_rpc_method(RPC_SUBMIT_ANSWER, submit_answer)
+    room.local_participant.register_rpc_method(RPC_CLEAR_ANSWER, clear_answer)
 
 
 class GrillVoiceAgent(Agent):
@@ -140,6 +177,7 @@ async def interview_agent(ctx: JobContext) -> None:
         stt=build_stt(settings, keyterms),
         tts=build_tts(settings),
         vad=ctx.proc.userdata["vad"],
+        turn_handling=TURN_HANDLING,
     )
 
     timer_task: asyncio.Task[None] | None = None
@@ -177,6 +215,7 @@ async def interview_agent(ctx: JobContext) -> None:
         keyterms=len(keyterms),
     )
     await session.start(agent=GrillVoiceAgent(controller), room=ctx.room)
+    register_answer_rpcs(ctx.room, session)
     timer_task = asyncio.create_task(watch_timer(session, controller))
 
 

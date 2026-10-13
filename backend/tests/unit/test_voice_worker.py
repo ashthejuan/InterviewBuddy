@@ -9,7 +9,14 @@ from livekit.agents import ChatContext, ChatMessage, StopResponse
 from livekit.plugins import sarvam
 
 from agent.controller import CLOSING_LINE, VoiceReply
-from agent.worker import GrillVoiceAgent, build_stt, build_tts, speak
+from agent.worker import (
+    BULBUL_V4_DEFAULT_SPEAKER,
+    TURN_HANDLING,
+    GrillVoiceAgent,
+    build_stt,
+    build_tts,
+    speak,
+)
 from app.config import Settings
 
 
@@ -60,10 +67,22 @@ def test_build_tts_falls_back_to_versioned_bulbul() -> None:
     assert build_tts(_settings(sarvam_tts_model="bulbul:v2"))._opts.model == "bulbul:v2"
 
 
-def test_speak_question_is_interruptible_and_keeps_session() -> None:
+def test_build_tts_v4_gets_a_compatible_default_speaker() -> None:
+    engine = build_tts(_settings(sarvam_tts_model="bulbul:v4-flash"))
+    assert engine._opts.speaker == BULBUL_V4_DEFAULT_SPEAKER
+    explicit = build_tts(_settings(sarvam_tts_model="bulbul:v4-flash", sarvam_tts_speaker="dev_en_conversational"))
+    assert explicit._opts.speaker == "dev_en_conversational"
+
+
+def test_turns_are_candidate_driven() -> None:
+    assert TURN_HANDLING["turn_detection"] == "manual"
+    assert TURN_HANDLING["interruption"] == {"enabled": False}
+
+
+def test_speak_question_plays_through_and_keeps_session() -> None:
     session = FakeSession()
     speak(session, VoiceReply("Tell me about FastAPI."))  # type: ignore[arg-type]
-    assert session.said == [("Tell me about FastAPI.", True)]
+    assert session.said == [("Tell me about FastAPI.", False)]
     assert session.shutdowns == []
 
 
@@ -93,7 +112,7 @@ def test_user_turn_routes_to_grill_and_suppresses_llm(monkeypatch: pytest.Monkey
     with pytest.raises(StopResponse):
         asyncio.run(agent.on_user_turn_completed(ChatContext.empty(), msg))
     assert controller.heard == ["I built the billing API"]
-    assert session.said == [("What did you own?", True)]
+    assert session.said == [("What did you own?", False)]
 
 
 def test_user_turn_that_wraps_ends_session(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -107,4 +126,4 @@ def test_user_turn_that_wraps_ends_session(monkeypatch: pytest.MonkeyPatch) -> N
 def test_on_enter_speaks_opening(monkeypatch: pytest.MonkeyPatch) -> None:
     agent, _, session = _agent_with(monkeypatch, VoiceReply("Welcome — tell me about yourself."))
     asyncio.run(agent.on_enter())
-    assert session.said == [("Welcome — tell me about yourself.", True)]
+    assert session.said == [("Welcome — tell me about yourself.", False)]

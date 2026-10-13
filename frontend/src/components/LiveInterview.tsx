@@ -18,7 +18,9 @@ import { formatCountdown, secondsRemaining } from "@/lib/timer";
 import { useVoiceRoom } from "@/lib/useVoiceRoom";
 import {
   canJoinVoice,
+  canSubmitVoiceAnswer,
   displayTurnText,
+  interviewerStatus,
   isVoiceActive,
   voicePhaseLabel,
 } from "@/lib/voice";
@@ -230,15 +232,10 @@ export function LiveInterview({ sessionId }: { sessionId: string }) {
               >
                 {voicePhaseLabel(voice.phase)}
               </Badge>
-              {voiceTalking && voice.agentSpeaking && (
-                <span className="text-[13px] font-normal text-muted-foreground">
-                  Interviewer speaking — you can interrupt
-                </span>
-              )}
             </CardTitle>
             <CardDescription>
-              Speak your answers; the interviewer replies out loud. Leaving the call
-              ends the interview.
+              The interviewer asks each question out loud. Answer at your own pace, then
+              press Submit answer. Leaving the call ends the interview.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -246,6 +243,104 @@ export function LiveInterview({ sessionId }: { sessionId: string }) {
               <Alert className="border-destructive/30">
                 <AlertDescription>{voice.error}</AlertDescription>
               </Alert>
+            )}
+            {voiceTalking && (
+              <p
+                className={
+                  voice.agentLate
+                    ? "text-[14px] font-medium text-destructive"
+                    : "text-[14px] text-muted-foreground"
+                }
+              >
+                {interviewerStatus({
+                  joined: voice.agentJoined,
+                  state: voice.agentState,
+                  waitedTooLong: voice.agentLate,
+                  awaitingReply: voice.awaitingReply,
+                })}
+              </p>
+            )}
+            {voiceTalking && voice.notice && (
+              <p className="text-[14px] font-medium text-destructive">{voice.notice}</p>
+            )}
+            {voiceTalking && (
+              <div
+                className="rounded-lg border border-border bg-muted/40 px-4 py-3"
+                aria-live="polite"
+              >
+                <div className="mb-2 flex items-center gap-2">
+                  <span
+                    className={
+                      voice.userSpeaking && !voice.muted
+                        ? "size-2 rounded-full bg-brand"
+                        : "size-2 rounded-full bg-muted-foreground/40"
+                    }
+                    aria-hidden
+                  />
+                  <span className="font-mono text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {voice.muted
+                      ? "Mic muted"
+                      : voice.userSpeaking
+                        ? "Hearing you"
+                        : "What the interviewer hears"}
+                  </span>
+                </div>
+                {voice.heard.length === 0 ? (
+                  <p className="text-[15px] text-muted-foreground">
+                    {!voice.agentJoined
+                      ? "Live transcription starts once the interviewer joins."
+                      : voice.agentState === "speaking"
+                        ? "Listen to the question, then answer when it finishes."
+                        : "Take your time. Pauses are fine — nothing is sent until you press Submit answer."}
+                  </p>
+                ) : (
+                  <div className="space-y-1">
+                    {voice.heard.map((seg) => (
+                      <p
+                        key={seg.id}
+                        className={
+                          seg.final
+                            ? "text-[15px] leading-relaxed text-foreground"
+                            : "text-[15px] leading-relaxed text-foreground/60 italic"
+                        }
+                      >
+                        {seg.text}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {voiceTalking && voice.agentJoined && (
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  type="button"
+                  onClick={() => void voice.submitAnswer()}
+                  disabled={
+                    !canSubmitVoiceAnswer({
+                      joined: voice.agentJoined,
+                      state: voice.agentState,
+                      awaitingReply: voice.awaitingReply,
+                      submitting: voice.submitting,
+                      heard: voice.heard,
+                    })
+                  }
+                  className="rounded-lg bg-brand font-semibold text-white hover:bg-brand/90"
+                >
+                  {voice.submitting ? "Submitting…" : "Submit answer"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void voice.clearAnswer()}
+                  disabled={
+                    voice.submitting || voice.awaitingReply || voice.heard.length === 0
+                  }
+                  className="rounded-full"
+                >
+                  Clear and restart answer
+                </Button>
+              </div>
             )}
             <div className="flex flex-wrap gap-3">
               {canJoinVoice({

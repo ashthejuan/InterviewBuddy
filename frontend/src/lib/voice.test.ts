@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 import { ApiError, type TurnOut } from "./api";
 import {
   canJoinVoice,
+  canSubmitVoiceAnswer,
   describeVoiceError,
   displayTurnText,
+  interviewerStatus,
   isVoiceActive,
   phaseFromConnectionState,
+  upsertHeardSegment,
   voicePhaseLabel,
+  type HeardSegment,
 } from "./voice";
 
 describe("phaseFromConnectionState", () => {
@@ -89,5 +93,71 @@ describe("displayTurnText", () => {
 
   it("shows raw text for agent turns", () => {
     expect(displayTurnText({ ...base, role: "agent" })).toBe("fast api");
+  });
+});
+
+describe("upsertHeardSegment", () => {
+  it("replaces interim text in place, then finalizes the same segment", () => {
+    let list = upsertHeardSegment([], { id: "a", text: "I built", final: false });
+    list = upsertHeardSegment(list, { id: "a", text: "I built the API", final: false });
+    expect(list).toEqual([{ id: "a", text: "I built the API", final: false }]);
+    list = upsertHeardSegment(list, { id: "a", text: "I built the API.", final: true });
+    expect(list).toEqual([{ id: "a", text: "I built the API.", final: true }]);
+  });
+
+  it("appends new segments and keeps only the most recent", () => {
+    let list: HeardSegment[] = [];
+    for (const id of ["1", "2", "3", "4"]) {
+      list = upsertHeardSegment(list, { id, text: id, final: true }, 3);
+    }
+    expect(list.map((s) => s.id)).toEqual(["2", "3", "4"]);
+  });
+
+  it("ignores blank interim text", () => {
+    expect(upsertHeardSegment([], { id: "a", text: "  ", final: false })).toEqual([]);
+  });
+});
+
+describe("interviewerStatus", () => {
+  it("warns when the agent never joins", () => {
+    expect(interviewerStatus({ joined: false, state: null, waitedTooLong: false })).toMatch(
+      /waiting/i,
+    );
+    expect(interviewerStatus({ joined: false, state: null, waitedTooLong: true })).toMatch(
+      /hasn't joined/i,
+    );
+  });
+
+  it("walks question → answer → evaluating once joined", () => {
+    const base = { joined: true, waitedTooLong: false };
+    expect(interviewerStatus({ ...base, state: "speaking" })).toMatch(/asking/i);
+    expect(interviewerStatus({ ...base, state: "listening" })).toMatch(/submit answer/i);
+    expect(interviewerStatus({ ...base, state: "listening", awaitingReply: true })).toMatch(
+      /evaluating/i,
+    );
+    expect(interviewerStatus({ ...base, state: "thinking" })).toMatch(/evaluating/i);
+    expect(interviewerStatus({ ...base, state: null })).toMatch(/getting ready/i);
+  });
+});
+
+describe("canSubmitVoiceAnswer", () => {
+  const ready = {
+    joined: true,
+    state: "listening",
+    awaitingReply: false,
+    submitting: false,
+    heard: [{ id: "a", text: "I built it", final: true }],
+  };
+
+  it("allows submit while the agent waits and speech was heard", () => {
+    expect(canSubmitVoiceAnswer(ready)).toBe(true);
+  });
+
+  it("blocks submit while asking, evaluating, submitting, or with nothing heard", () => {
+    expect(canSubmitVoiceAnswer({ ...ready, state: "speaking" })).toBe(false);
+    expect(canSubmitVoiceAnswer({ ...ready, awaitingReply: true })).toBe(false);
+    expect(canSubmitVoiceAnswer({ ...ready, submitting: true })).toBe(false);
+    expect(canSubmitVoiceAnswer({ ...ready, heard: [] })).toBe(false);
+    expect(canSubmitVoiceAnswer({ ...ready, joined: false })).toBe(false);
   });
 });
