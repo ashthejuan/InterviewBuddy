@@ -61,7 +61,11 @@ def main() -> int:
     before = {p.name for p in reports_dir().glob("report_*")}
 
     with TestClient(app) as client:
+        from app.auth import mint_test_token
+
         user_id = uuid.uuid4()
+        token = mint_test_token(user_id=user_id, secret=get_settings().auth_secret)
+        client.headers.update({"Authorization": f"Bearer {token}"})
         client.post(
             "/users",
             json={

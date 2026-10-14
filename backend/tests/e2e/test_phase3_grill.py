@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-import uuid
 
 from fastapi.testclient import TestClient
 
@@ -26,19 +25,15 @@ Python, FastAPI, Postgres
 
 
 def _seed_ready(client: TestClient, duration: int = 15) -> str:
-    user_id = uuid.uuid4()
-    client.post(
-        "/users",
-        json={
-            "id": str(user_id),
-            "email": f"grill-{user_id.hex[:10]}@test.local",
-            "name": "Grill",
-        },
-    )
+    # DEV_USER_ID is self-provisioned by the `client` fixture; session
+    # ownership comes from the Bearer JWT, not body.user_id.
+    from tests.e2e.conftest import DEV_USER_ID, ensure_user_exists
+
+    ensure_user_exists(client, DEV_USER_ID, "dev@interviewbuddy.local", "Dev")
     session = client.post(
         "/sessions",
         json={
-            "user_id": str(user_id),
+            "user_id": str(DEV_USER_ID),
             "settings": {
                 "duration_minutes": duration,
                 "difficulty": "medium",

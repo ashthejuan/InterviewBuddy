@@ -8,50 +8,55 @@ from fastapi.testclient import TestClient
 
 from app.auth import mint_test_token
 from app.config import get_settings
-from tests.e2e.conftest import DEV_USER_ID
+from tests.e2e.conftest import DEV_USER_ID, ensure_user_exists
 
 
-def test_health(client: TestClient) -> None:
-    r = client.get("/health")
-    assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+def test_health(client: TestClient, bare_client: TestClient) -> None:
+    for c in (client, bare_client):
+        r = c.get("/health")
+        assert r.status_code == 200
+        assert r.json() == {"status": "ok"}
 
 
-def test_user_session_flow(client: TestClient) -> None:
-    user_id = uuid.uuid4()
-    email = f"e2e-{user_id.hex[:12]}@test.local"
+def test_user_self_provisioning_flow(client: TestClient) -> None:
+    # DEV_USER_ID is self-provisioned by the `client` fixture; re-seeding is idempotent.
+    ensure_user_exists(client, DEV_USER_ID, "dev@interviewbuddy.local", "Dev")
 
-    create_user = client.post(
+    get_self = client.get(f"/users/{DEV_USER_ID}")
+    assert get_self.status_code == 200
+    assert get_self.json()["id"] == str(DEV_USER_ID)
+
+    # Self-provisioning a fresh user with its own token succeeds.
+    fresh_id = uuid.uuid4()
+    fresh_email = f"e2e-{fresh_id.hex[:12]}@test.local"
+    fresh_token = mint_test_token(user_id=fresh_id, secret=get_settings().auth_secret)
+    fresh_headers = {"Authorization": f"Bearer {fresh_token}"}
+    create_fresh = client.post(
         "/users",
-        json={"id": str(user_id), "email": email, "name": "E2E"},
+        json={"id": str(fresh_id), "email": fresh_email, "name": "E2E"},
+        headers=fresh_headers,
     )
-    assert create_user.status_code == 201, create_user.text
-    body = create_user.json()
-    assert body["id"] == str(user_id)
-    assert body["email"] == email
+    assert create_fresh.status_code in (201, 409), create_fresh.text
 
-    get_user = client.get(f"/users/{user_id}")
-    assert get_user.status_code == 200
-    assert get_user.json()["email"] == email
+    get_fresh = client.get(f"/users/{fresh_id}", headers=fresh_headers)
+    assert get_fresh.status_code == 200
+    assert get_fresh.json()["email"] == fresh_email
 
-    dup = client.post("/users", json={"email": email, "name": "Dup"})
+    # Duplicate email (self id, taken email) is rejected.
+    dup_id = uuid.uuid4()
+    dup_token = mint_test_token(user_id=dup_id, secret=get_settings().auth_secret)
+    dup = client.post(
+        "/users",
+        json={"id": str(dup_id), "email": fresh_email, "name": "Dup"},
+        headers={"Authorization": f"Bearer {dup_token}"},
+    )
     assert dup.status_code == 409
 
     # Session ownership comes from the Bearer JWT (DEV_USER_ID in conftest), not body.user_id.
-    seed = client.post(
-        "/users",
-        json={
-            "id": str(DEV_USER_ID),
-            "email": "dev@interviewbuddy.local",
-            "name": "Dev",
-        },
-    )
-    assert seed.status_code in (201, 409), seed.text
-
     create_session = client.post(
         "/sessions",
         json={
-            "user_id": str(user_id),  # ignored
+            "user_id": str(fresh_id),  # ignored
             "settings": {
                 "duration_minutes": 15,
                 "difficulty": "hard",
@@ -77,6 +82,18 @@ def test_user_session_flow(client: TestClient) -> None:
     assert get_session.json()["settings"]["difficulty"] == "hard"
 
 
+def test_user_routes_reject_cross_user(client: TestClient) -> None:
+    other = uuid.uuid4()
+    # DEV token cannot create a different user id.
+    r = client.post(
+        "/users",
+        json={"id": str(other), "email": f"sq-{other.hex[:8]}@test.local"},
+    )
+    assert r.status_code == 403
+    # DEV token cannot read a different user (existence oracle closed -> 403, not 404).
+    assert client.get(f"/users/{other}").status_code == 403
+
+
 def test_session_requires_existing_user(client: TestClient) -> None:
     missing = uuid.uuid4()
     token = mint_test_token(user_id=missing, secret=get_settings().auth_secret)
@@ -91,5 +108,4 @@ def test_session_requires_existing_user(client: TestClient) -> None:
 
 def test_get_missing_returns_404(client: TestClient) -> None:
     missing = uuid.uuid4()
-    assert client.get(f"/users/{missing}").status_code == 404
     assert client.get(f"/sessions/{missing}").status_code == 404

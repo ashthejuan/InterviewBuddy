@@ -113,8 +113,15 @@ async def _owned_document(
 async def create_user(
     body: UserCreate,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> User:
-    user = User(id=body.id or uuid.uuid4(), email=body.email, name=body.name)
+    # Self-provisioning only: the created row must match the JWT subject.
+    # Prevents authenticated users from squatting arbitrary user ids/emails.
+    # `body.id` is accepted for test/dev seeding and must equal the subject;
+    # when omitted, the subject id is used.
+    target_id = body.id or current_user.id
+    require_owner(current_user, target_id)
+    user = User(id=target_id, email=body.email, name=body.name)
     db.add(user)
     try:
         await db.commit()
@@ -129,7 +136,10 @@ async def create_user(
 async def get_user(
     user_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> User:
+    # Owner check first: do not leak existence of other users' ids.
+    require_owner(current_user, user_id)
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="user not found")

@@ -36,8 +36,27 @@ def auth_header(auth_secret: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def ensure_user_exists(
+    client: TestClient, user_id: uuid.UUID, email: str, name: str = "E2E"
+) -> None:
+    """Idempotently self-provision `user_id` (POST /users requires id == JWT sub)."""
+    r = client.post(
+        "/users",
+        json={"id": str(user_id), "email": email, "name": name},
+    )
+    assert r.status_code in (201, 409), r.text
+
+
 @pytest.fixture(scope="session")
 def client(auth_header: dict[str, str]):
     with TestClient(app) as c:
         c.headers.update(auth_header)
+        ensure_user_exists(c, DEV_USER_ID, "dev@interviewbuddy.local", "Dev")
+        yield c
+
+
+@pytest.fixture(scope="session")
+def bare_client():
+    """Unauthenticated client (no default Bearer header) for 401 matrix tests."""
+    with TestClient(app) as c:
         yield c

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-import uuid
 
 from fastapi.testclient import TestClient
 
@@ -35,15 +34,13 @@ JD = """\
 
 
 def _seed_session(client: TestClient, duration: int = 30) -> str:
-    user_id = uuid.uuid4()
-    client.post(
-        "/users",
-        json={"id": str(user_id), "email": f"prep-{user_id.hex[:10]}@test.local", "name": "Prep"},
-    )
+    from tests.e2e.conftest import DEV_USER_ID, ensure_user_exists
+
+    ensure_user_exists(client, DEV_USER_ID, "dev@interviewbuddy.local", "Dev")
     session = client.post(
         "/sessions",
         json={
-            "user_id": str(user_id),
+            "user_id": str(DEV_USER_ID),
             "settings": {
                 "duration_minutes": duration,
                 "difficulty": "medium",

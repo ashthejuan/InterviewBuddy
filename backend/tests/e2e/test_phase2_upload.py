@@ -3,19 +3,16 @@
 from __future__ import annotations
 
 import time
-import uuid
 
 from fastapi.testclient import TestClient
 
 
 def _seed_session(client: TestClient) -> tuple[str, str]:
-    user_id = uuid.uuid4()
-    client.post(
-        "/users",
-        json={"id": str(user_id), "email": f"up-{user_id.hex[:10]}@test.local", "name": "Up"},
-    )
-    session = client.post("/sessions", json={"user_id": str(user_id)}).json()
-    return str(user_id), session["id"]
+    from tests.e2e.conftest import DEV_USER_ID, ensure_user_exists
+
+    ensure_user_exists(client, DEV_USER_ID, "dev@interviewbuddy.local", "Dev")
+    session = client.post("/sessions", json={"user_id": str(DEV_USER_ID)}).json()
+    return str(DEV_USER_ID), session["id"]
 
 
 def _wait_doc(client: TestClient, doc_id: str, timeout: float = 15.0) -> dict:

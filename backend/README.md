@@ -2,10 +2,10 @@
 # Migrations:     uv run alembic upgrade head
 # Tests:          uv run pytest -v   (needs Postgres + MinIO up)
 #
-# Phase 1 CRUD:
-#   POST /users          — create (optionally pass id = DEV_USER_ID)
-#   GET  /users/{id}
-#   POST /sessions       — status=preparing; user_id defaults to DEV_USER_ID
+# Phase 1 CRUD (all require Bearer JWT; ownership = JWT sub):
+#   POST /users          — self-provision only (body.id must equal JWT sub)
+#   GET  /users/{id}     — self only (403 otherwise)
+#   POST /sessions       — status=preparing; owner = JWT sub (body.user_id ignored)
 #   GET  /sessions/{id}
 #
 # Phase 2 documents:
