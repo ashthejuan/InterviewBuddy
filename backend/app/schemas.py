@@ -37,7 +37,7 @@ class SessionSettings(BaseModel):
 
 class SessionCreate(BaseModel):
     settings: SessionSettings = Field(default_factory=SessionSettings)
-    user_id: uuid.UUID | None = None  # defaults to DEV_USER_ID
+    user_id: uuid.UUID | None = None  # ignored; JWT subject owns the session
     resume_document_id: uuid.UUID | None = None
     jd_document_id: uuid.UUID | None = None
 

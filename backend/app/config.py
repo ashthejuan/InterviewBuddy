@@ -17,6 +17,8 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://interviewbuddy:interviewbuddy@localhost:5432/interviewbuddy"
     )
     dev_user_id: str = "00000000-0000-0000-0000-000000000001"
+    # Shared with Auth.js — used to verify API Bearer tokens (HS256).
+    auth_secret: str = ""
 
     # R2 / MinIO (S3-compatible)
     r2_access_key_id: str = "minioadmin"

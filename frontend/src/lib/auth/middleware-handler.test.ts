@@ -43,4 +43,12 @@ describe("auth path middleware", () => {
     const res = applyAuthMiddleware(req, true);
     expect(res.headers.get("location")).toBeNull();
   });
+
+  it("does not redirect unauthenticated /api/access-token (JSON 401 from route)", () => {
+    const req = new NextRequest("http://localhost:3000/api/access-token", {
+      method: "GET",
+    });
+    const res = applyAuthMiddleware(req, false);
+    expect(res.headers.get("location")).toBeNull();
+  });
 });

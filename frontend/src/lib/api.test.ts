@@ -1,16 +1,23 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  clearAccessTokenCache,
   createSession,
-  ensureDevUser,
   getDocument,
   getSession,
   pasteDocument,
+  setAccessTokenProviderForTests,
   startSession,
   uploadDocument,
 } from "./api";
 
+beforeEach(() => {
+  setAccessTokenProviderForTests(async () => "test-access-token");
+});
+
 afterEach(() => {
+  setAccessTokenProviderForTests(null);
+  clearAccessTokenCache();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -24,31 +31,13 @@ function stubFetch(handler: (input: RequestInfo | URL, init?: RequestInit) => Re
   );
 }
 
-describe("ensureDevUser", () => {
-  it("creates the fixed dev user when missing", async () => {
-    stubFetch((input, init) => {
-      expect(String(input)).toMatch(/\/users$/);
-      expect(init?.method).toBe("POST");
-      const body = JSON.parse(String(init?.body));
-      expect(body.id).toBe("00000000-0000-0000-0000-000000000001");
-      return new Response(JSON.stringify({ id: body.id, email: body.email, name: "Dev", created_at: "" }), {
-        status: 201,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    await ensureDevUser();
-  });
-
-  it("treats 409 as already seeded", async () => {
-    stubFetch(() => new Response(JSON.stringify({ detail: "email already registered" }), { status: 409 }));
-    await expect(ensureDevUser()).resolves.toBeUndefined();
-  });
-});
-
 describe("createSession", () => {
-  it("posts settings and returns the session", async () => {
+  it("posts settings with Bearer auth and returns the session", async () => {
     stubFetch((input, init) => {
       expect(String(input)).toMatch(/\/sessions$/);
+      expect(new Headers(init?.headers).get("Authorization")).toBe(
+        "Bearer test-access-token",
+      );
       expect(JSON.parse(String(init?.body))).toEqual({
         settings: { duration_minutes: 20, difficulty: "hard", seniority: "senior" },
       });

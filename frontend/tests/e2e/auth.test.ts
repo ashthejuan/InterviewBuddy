@@ -1,26 +1,26 @@
 /**
- * Auth.js credentials e2e: HTTP surface for signup + login.
- * Uses route handlers (same as production) against an isolated user store.
+ * Auth.js credentials e2e: HTTP surface for signup + login against Postgres.
  */
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("auth e2e — POST /signup and POST /login", () => {
-  let dir: string;
+  const emails: string[] = [];
 
   beforeEach(() => {
-    dir = mkdtempSync(path.join(tmpdir(), "auth-e2e-"));
-    process.env.AUTH_USERS_PATH = path.join(dir, "users.json");
     process.env.AUTH_SECRET = "test-auth-secret-at-least-32-chars-long";
     process.env.AUTH_URL = "http://localhost:3000";
+    if (!process.env.DATABASE_URL) {
+      process.env.DATABASE_URL =
+        "postgresql://interviewbuddy:interviewbuddy@localhost:5432/interviewbuddy";
+    }
   });
 
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-    delete process.env.AUTH_USERS_PATH;
-    // Reset module state between tests (store path)
+  afterEach(async () => {
+    const { deleteUsersByEmailsForTests, resetUsersStoreForTests } =
+      await import("@/lib/auth/users");
+    await deleteUsersByEmailsForTests(emails.splice(0));
+    await resetUsersStoreForTests();
     vi.resetModules();
   });
 
@@ -47,10 +47,8 @@ describe("auth e2e — POST /signup and POST /login", () => {
   }
 
   it("signs up then logs in with email and password", async () => {
-    const { resetUsersStoreForTests } = await import("@/lib/auth/users");
-    resetUsersStoreForTests();
-
-    const email = "e2e@example.com";
+    const email = `e2e-${randomUUID()}@example.com`;
+    emails.push(email);
     const password = "securepass";
 
     const signupRes = await postSignup({
@@ -77,11 +75,8 @@ describe("auth e2e — POST /signup and POST /login", () => {
   });
 
   it("rejects signup with a weak password", async () => {
-    const { resetUsersStoreForTests } = await import("@/lib/auth/users");
-    resetUsersStoreForTests();
-
     const res = await postSignup({
-      email: "weak@example.com",
+      email: `weak-${randomUUID()}@example.com`,
       password: "short",
     });
     expect(res.status).toBe(400);
@@ -90,13 +85,12 @@ describe("auth e2e — POST /signup and POST /login", () => {
   });
 
   it("rejects login with wrong password", async () => {
-    const { resetUsersStoreForTests } = await import("@/lib/auth/users");
-    resetUsersStoreForTests();
-
-    await postSignup({ email: "bad@example.com", password: "securepass" });
+    const email = `bad-${randomUUID()}@example.com`;
+    emails.push(email);
+    await postSignup({ email, password: "securepass" });
 
     const res = await postLogin({
-      email: "bad@example.com",
+      email,
       password: "wrong-pass",
     });
     expect(res.status).toBe(401);
@@ -105,13 +99,9 @@ describe("auth e2e — POST /signup and POST /login", () => {
   });
 
   it("rejects duplicate signup", async () => {
-    const { resetUsersStoreForTests } = await import("@/lib/auth/users");
-    resetUsersStoreForTests();
-
-    const payload = {
-      email: "dup@example.com",
-      password: "securepass",
-    };
+    const email = `dup-${randomUUID()}@example.com`;
+    emails.push(email);
+    const payload = { email, password: "securepass" };
     const first = await postSignup(payload);
     expect(first.status).toBe(201);
 

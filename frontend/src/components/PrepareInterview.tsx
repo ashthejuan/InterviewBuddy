@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   ApiError,
   createSession,
-  ensureDevUser,
   getDocument,
   getSession,
   getSessionTopics,
@@ -241,7 +240,6 @@ export function PrepareInterview() {
 
     setBusy(true);
     try {
-      await ensureDevUser();
       const created = await createSession({
         duration_minutes: duration,
         difficulty,

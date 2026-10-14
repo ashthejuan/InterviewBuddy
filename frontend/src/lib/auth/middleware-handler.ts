@@ -5,7 +5,8 @@ function isAuthApiPath(pathname: string): boolean {
   return (
     pathname.startsWith("/api/auth") ||
     pathname === "/api/signup" ||
-    pathname === "/api/login"
+    pathname === "/api/login" ||
+    pathname === "/api/access-token"
   );
 }
 

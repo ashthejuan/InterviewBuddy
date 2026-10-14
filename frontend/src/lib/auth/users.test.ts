@@ -1,6 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createUser,
@@ -9,53 +7,67 @@ import {
   verifyUserCredentials,
 } from "./users";
 
-describe("users store", () => {
-  let dir: string;
+/**
+ * Uses the same Postgres as docker compose (DATABASE_URL).
+ * Each test uses a unique email and deletes the row afterward.
+ */
+describe("users store (Postgres password_hash)", () => {
+  const emails: string[] = [];
 
-  beforeEach(() => {
-    dir = mkdtempSync(path.join(tmpdir(), "auth-users-"));
-    process.env.AUTH_USERS_PATH = path.join(dir, "users.json");
+  beforeEach(async () => {
+    if (!process.env.DATABASE_URL) {
+      process.env.DATABASE_URL =
+        "postgresql://interviewbuddy:interviewbuddy@localhost:5432/interviewbuddy";
+    }
+    await resetUsersStoreForTests();
+  });
+
+  afterEach(async () => {
+    const { deleteUsersByEmailsForTests } = await import("./users");
+    await deleteUsersByEmailsForTests(emails.splice(0));
     resetUsersStoreForTests();
   });
 
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-    delete process.env.AUTH_USERS_PATH;
-    resetUsersStoreForTests();
-  });
+  it("creates a user with a hashed password in Postgres", async () => {
+    const email = `ada-${randomUUID()}@example.com`;
+    emails.push(email);
 
-  it("creates a user with a hashed password", async () => {
     const user = await createUser({
-      email: "Ada@Example.com",
+      email: email.toUpperCase().replace("ada", "Ada"),
       password: "securepass",
       name: "Ada",
     });
 
-    expect(user.email).toBe("ada@example.com");
+    expect(user.email).toBe(email.toLowerCase());
     expect(user.name).toBe("Ada");
     expect(user.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     );
     expect(user).not.toHaveProperty("passwordHash");
 
-    const stored = await findUserByEmail("ada@example.com");
+    const stored = await findUserByEmail(email);
     expect(stored?.passwordHash).toBeTruthy();
     expect(stored?.passwordHash).not.toBe("securepass");
+    expect(stored?.passwordHash.startsWith("$2")).toBe(true);
   });
 
   it("rejects duplicate email", async () => {
-    await createUser({ email: "dup@example.com", password: "securepass" });
+    const email = `dup-${randomUUID()}@example.com`;
+    emails.push(email);
+    await createUser({ email, password: "securepass" });
     await expect(
-      createUser({ email: "dup@example.com", password: "securepass" }),
+      createUser({ email, password: "securepass" }),
     ).rejects.toMatchObject({ code: "EMAIL_TAKEN" });
   });
 
   it("verifies credentials for an existing user", async () => {
-    await createUser({ email: "login@example.com", password: "securepass" });
-    const ok = await verifyUserCredentials("login@example.com", "securepass");
-    expect(ok?.email).toBe("login@example.com");
+    const email = `login-${randomUUID()}@example.com`;
+    emails.push(email);
+    await createUser({ email, password: "securepass" });
+    const ok = await verifyUserCredentials(email, "securepass");
+    expect(ok?.email).toBe(email);
     await expect(
-      verifyUserCredentials("login@example.com", "nope-nope"),
+      verifyUserCredentials(email, "nope-nope"),
     ).resolves.toBeNull();
   });
 });

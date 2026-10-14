@@ -166,9 +166,48 @@ async function readError(res: Response): Promise<string> {
   return `Request failed: ${res.status}`;
 }
 
+type TokenCache = { token: string; expiresAtMs: number };
+let tokenCache: TokenCache | null = null;
+let accessTokenProvider: (() => Promise<string>) | null = null;
+
+/** Vitest / tooling: supply a Bearer token without hitting `/api/access-token`. */
+export function setAccessTokenProviderForTests(
+  provider: (() => Promise<string>) | null,
+): void {
+  accessTokenProvider = provider;
+  tokenCache = null;
+}
+
+export function clearAccessTokenCache(): void {
+  tokenCache = null;
+}
+
+async function resolveAccessToken(): Promise<string> {
+  if (accessTokenProvider) {
+    return accessTokenProvider();
+  }
+  if (tokenCache && tokenCache.expiresAtMs > Date.now() + 60_000) {
+    return tokenCache.token;
+  }
+  const res = await fetch("/api/access-token", { cache: "no-store" });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readError(res));
+  }
+  const body = (await res.json()) as { token: string; expiresAt: string };
+  tokenCache = {
+    token: body.token,
+    expiresAtMs: Date.parse(body.expiresAt),
+  };
+  return body.token;
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = await resolveAccessToken();
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
+    headers,
     cache: "no-store",
   });
   if (!res.ok) {
@@ -179,22 +218,11 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function getHealth(): Promise<HealthResponse> {
-  return api<HealthResponse>("/health");
-}
-
-export async function ensureDevUser(): Promise<void> {
-  const res = await fetch(`${API_BASE}/users`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      id: DEV_USER_ID,
-      email: "dev@interviewbuddy.local",
-      name: "Dev",
-    }),
-    cache: "no-store",
-  });
-  if (res.ok || res.status === 409) return;
-  throw new ApiError(res.status, await readError(res));
+  const res = await fetch(`${API_BASE}/health`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readError(res));
+  }
+  return res.json() as Promise<HealthResponse>;
 }
 
 export async function createSession(
@@ -271,7 +299,9 @@ export async function retrySessionReport(
 }
 
 export async function downloadSessionReportPdf(sessionId: string): Promise<void> {
+  const token = await resolveAccessToken();
   const res = await fetch(`${API_BASE}/sessions/${sessionId}/report.pdf`, {
+    headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
   if (!res.ok) {

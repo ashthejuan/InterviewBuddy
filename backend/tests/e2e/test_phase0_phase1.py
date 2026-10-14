@@ -6,6 +6,10 @@ import uuid
 
 from fastapi.testclient import TestClient
 
+from app.auth import mint_test_token
+from app.config import get_settings
+from tests.e2e.conftest import DEV_USER_ID
+
 
 def test_health(client: TestClient) -> None:
     r = client.get("/health")
@@ -33,10 +37,21 @@ def test_user_session_flow(client: TestClient) -> None:
     dup = client.post("/users", json={"email": email, "name": "Dup"})
     assert dup.status_code == 409
 
+    # Session ownership comes from the Bearer JWT (DEV_USER_ID in conftest), not body.user_id.
+    seed = client.post(
+        "/users",
+        json={
+            "id": str(DEV_USER_ID),
+            "email": "dev@interviewbuddy.local",
+            "name": "Dev",
+        },
+    )
+    assert seed.status_code in (201, 409), seed.text
+
     create_session = client.post(
         "/sessions",
         json={
-            "user_id": str(user_id),
+            "user_id": str(user_id),  # ignored
             "settings": {
                 "duration_minutes": 15,
                 "difficulty": "hard",
@@ -47,7 +62,7 @@ def test_user_session_flow(client: TestClient) -> None:
     assert create_session.status_code == 201, create_session.text
     session = create_session.json()
     assert session["status"] == "preparing"
-    assert session["user_id"] == str(user_id)
+    assert session["user_id"] == str(DEV_USER_ID)
     assert session["settings"] == {
         "duration_minutes": 15,
         "difficulty": "hard",
@@ -64,7 +79,12 @@ def test_user_session_flow(client: TestClient) -> None:
 
 def test_session_requires_existing_user(client: TestClient) -> None:
     missing = uuid.uuid4()
-    r = client.post("/sessions", json={"user_id": str(missing)})
+    token = mint_test_token(user_id=missing, secret=get_settings().auth_secret)
+    r = client.post(
+        "/sessions",
+        json={},
+        headers={"Authorization": f"Bearer {token}"},
+    )
     assert r.status_code == 404
     assert "not found" in r.json()["detail"]
 

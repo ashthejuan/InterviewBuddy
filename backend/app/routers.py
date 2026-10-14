@@ -22,6 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.auth import AuthedUser, get_current_user, require_owner
 from app.config import get_settings
 from app.db import get_session
 from app.models import (
@@ -75,6 +76,30 @@ from app.services.validate_upload import (
 router = APIRouter()
 
 
+async def _owned_session(
+    session_id: uuid.UUID,
+    db: AsyncSession,
+    user: AuthedUser,
+) -> InterviewSession:
+    session = await db.get(InterviewSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    require_owner(user, session.user_id)
+    return session
+
+
+async def _owned_document(
+    document_id: uuid.UUID,
+    db: AsyncSession,
+    user: AuthedUser,
+) -> Document:
+    doc = await db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    require_owner(user, doc.user_id)
+    return doc
+
+
 @router.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 async def create_user(
     body: UserCreate,
@@ -106,15 +131,16 @@ async def get_user(
 async def create_session(
     body: SessionCreate,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> InterviewSession:
-    settings = get_settings()
-    user_id = body.user_id or uuid.UUID(settings.dev_user_id)
+    # Ownership binds to the JWT subject (body.user_id ignored).
+    user_id = current_user.id
 
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(
             status_code=404,
-            detail=f"user {user_id} not found — create via POST /users first",
+            detail=f"user {user_id} not found — sign up first",
         )
 
     session = InterviewSession(
@@ -134,24 +160,18 @@ async def create_session(
 async def get_session_by_id(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> InterviewSession:
-    result = await db.execute(
-        select(InterviewSession).where(InterviewSession.id == session_id)
-    )
-    session = result.scalar_one_or_none()
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
-    return session
+    return await _owned_session(session_id, db, current_user)
 
 
 @router.post("/sessions/{session_id}/start", response_model=SessionOut)
 async def start_session(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> InterviewSession:
-    session = await db.get(InterviewSession, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    session = await _owned_session(session_id, db, current_user)
     if session.status in ("preparing", "failed"):
         raise HTTPException(
             status_code=409,
@@ -178,10 +198,9 @@ async def start_session(
 async def list_session_turns(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> list[Turn]:
-    session = await db.get(InterviewSession, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    await _owned_session(session_id, db, current_user)
     result = await db.execute(
         select(Turn)
         .where(Turn.session_id == session_id)
@@ -196,10 +215,9 @@ async def answer_session(
     body: AnswerIn,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> AnswerOut:
-    session = await db.get(InterviewSession, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    session = await _owned_session(session_id, db, current_user)
     if session.status != "live":
         raise HTTPException(
             status_code=409,
@@ -225,10 +243,9 @@ async def end_session(
     session_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> InterviewSession:
-    session = await db.get(InterviewSession, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    session = await _owned_session(session_id, db, current_user)
     if session.status not in ("live", "completed"):
         raise HTTPException(
             status_code=409,
@@ -256,10 +273,9 @@ async def get_session_report(
     session_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> SessionReportOut:
-    session = await db.get(InterviewSession, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    session = await _owned_session(session_id, db, current_user)
     if session.status != "completed":
         raise HTTPException(
             status_code=409,
@@ -289,10 +305,9 @@ async def retry_session_report(
     session_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> SessionReportOut:
-    session = await db.get(InterviewSession, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    session = await _owned_session(session_id, db, current_user)
     if session.status != "completed":
         raise HTTPException(
             status_code=409,
@@ -309,10 +324,9 @@ async def retry_session_report(
 async def download_session_report_pdf(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> Response:
-    session = await db.get(InterviewSession, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    session = await _owned_session(session_id, db, current_user)
     if session.status != "completed":
         raise HTTPException(
             status_code=409,
@@ -339,10 +353,9 @@ async def download_session_report_pdf(
 async def get_session_results(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> SessionResultOut:
-    session = await db.get(InterviewSession, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    session = await _owned_session(session_id, db, current_user)
     if session.status != "completed":
         raise HTTPException(
             status_code=409,
@@ -407,11 +420,10 @@ async def get_session_results(
 async def export_session_transcript(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> TranscriptExportOut:
     """Write transcript (+ results if present) to repo `interview_logs/interview_N.json`."""
-    session = await db.get(InterviewSession, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    session = await _owned_session(session_id, db, current_user)
     if session.status != "completed":
         raise HTTPException(
             status_code=409,
@@ -493,13 +505,12 @@ async def voice_status() -> VoiceStatusOut:
 async def create_voice_token(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> VoiceTokenOut:
     settings = get_settings()
     if not settings.voice_enabled:
         raise HTTPException(status_code=503, detail="voice is not configured on this server")
-    session = await db.get(InterviewSession, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    session = await _owned_session(session_id, db, current_user)
     if session.status != "live":
         raise HTTPException(
             status_code=409,
@@ -519,10 +530,9 @@ async def create_voice_token(
 async def list_session_topics(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> list[SessionTopic]:
-    session = await db.get(InterviewSession, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    await _owned_session(session_id, db, current_user)
     result = await db.execute(
         select(SessionTopic)
         .where(SessionTopic.session_id == session_id)
@@ -535,10 +545,9 @@ async def list_session_topics(
 async def list_session_frontier(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> list[FrontierNode]:
-    session = await db.get(InterviewSession, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    await _owned_session(session_id, db, current_user)
     result = await db.execute(
         select(FrontierNode).where(FrontierNode.session_id == session_id)
     )
@@ -549,21 +558,18 @@ async def list_session_frontier(
 async def get_document(
     document_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> Document:
-    doc = await db.get(Document, document_id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="document not found")
-    return doc
+    return await _owned_document(document_id, db, current_user)
 
 
 @router.get("/documents/{document_id}/sections", response_model=list[SectionOut])
 async def list_document_sections(
     document_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> list[SectionOut]:
-    doc = await db.get(Document, document_id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="document not found")
+    await _owned_document(document_id, db, current_user)
 
     result = await db.execute(
         select(DocumentSection)
@@ -609,13 +615,12 @@ async def upload_document(
     doc_type: str = Form(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> Document:
     if doc_type not in ("resume", "jd"):
         raise HTTPException(status_code=400, detail="doc_type must be resume or jd")
 
-    session = await db.get(InterviewSession, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    session = await _owned_session(session_id, db, current_user)
 
     settings = get_settings()
     data = await file.read(settings.max_upload_bytes + 1)
@@ -677,10 +682,9 @@ async def paste_document(
     body: PasteDocumentIn,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_session),
+    current_user: AuthedUser = Depends(get_current_user),
 ) -> Document:
-    session = await db.get(InterviewSession, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    session = await _owned_session(session_id, db, current_user)
 
     settings = get_settings()
     try:
