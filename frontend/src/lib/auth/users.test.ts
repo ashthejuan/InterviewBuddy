@@ -48,7 +48,7 @@ describe("users store (Postgres password_hash)", () => {
     const stored = await findUserByEmail(email);
     expect(stored?.passwordHash).toBeTruthy();
     expect(stored?.passwordHash).not.toBe("securepass");
-    expect(stored?.passwordHash.startsWith("$2")).toBe(true);
+    expect(stored?.passwordHash?.startsWith("$2")).toBe(true);
   });
 
   it("rejects duplicate email", async () => {

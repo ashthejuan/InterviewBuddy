@@ -2,13 +2,18 @@ import { randomUUID } from "node:crypto";
 import { Pool, type PoolClient, type QueryResult } from "pg";
 import { hashPassword, validatePassword, verifyPassword } from "./password";
 
-export type StoredUser = {
+/** Row as stored in Postgres (password optional for OAuth-only). */
+export type DbUser = {
   id: string;
   email: string;
   name: string | null;
-  passwordHash: string;
+  passwordHash: string | null;
+  githubId: string | null;
   createdAt: string;
 };
+
+/** Credential user with a password hash (legacy name used by tests). */
+export type StoredUser = DbUser & { passwordHash: string };
 
 export type PublicUser = {
   id: string;
@@ -66,14 +71,14 @@ export async function deleteUsersByEmailsForTests(
   ]);
 }
 
-function rowToStored(row: {
+function rowToDb(row: {
   id: string;
   email: string;
   name: string | null;
   password_hash: string | null;
+  github_id: string | null;
   created_at: Date | string;
-}): StoredUser | null {
-  if (!row.password_hash) return null;
+}): DbUser {
   const createdAt =
     row.created_at instanceof Date
       ? row.created_at.toISOString()
@@ -83,25 +88,43 @@ function rowToStored(row: {
     email: row.email,
     name: row.name,
     passwordHash: row.password_hash,
+    githubId: row.github_id,
     createdAt,
   };
 }
 
-function toPublic(user: StoredUser): PublicUser {
+function toPublic(user: Pick<DbUser, "id" | "email" | "name">): PublicUser {
   return { id: user.id, email: user.email, name: user.name };
 }
 
-export async function findUserByEmail(
-  email: string,
-): Promise<StoredUser | null> {
+const USER_SELECT = `SELECT id::text, email, name, password_hash, github_id, created_at FROM users`;
+
+export async function findUserByEmail(email: string): Promise<DbUser | null> {
   const normalized = email.trim().toLowerCase();
   const result: QueryResult = await getPool().query(
-    `SELECT id::text, email, name, password_hash, created_at
-     FROM users WHERE email = $1`,
+    `${USER_SELECT} WHERE email = $1`,
     [normalized],
   );
   if (result.rowCount === 0) return null;
-  return rowToStored(result.rows[0]);
+  return rowToDb(result.rows[0]);
+}
+
+export async function findUserByGithubId(
+  githubId: string,
+): Promise<DbUser | null> {
+  const result: QueryResult = await getPool().query(
+    `${USER_SELECT} WHERE github_id = $1`,
+    [githubId],
+  );
+  if (result.rowCount === 0) return null;
+  return rowToDb(result.rows[0]);
+}
+
+export async function setGithubId(userId: string, githubId: string): Promise<void> {
+  await getPool().query(`UPDATE users SET github_id = $2 WHERE id = $1::uuid`, [
+    userId,
+    githubId,
+  ]);
 }
 
 export async function createUser(input: {
@@ -148,12 +171,39 @@ export async function createUser(input: {
   return { id, email, name };
 }
 
+export async function createOAuthUser(input: {
+  email: string;
+  name?: string | null;
+  githubId: string;
+}): Promise<PublicUser> {
+  const email = input.email.trim().toLowerCase();
+  const id = randomUUID();
+  const name = input.name?.trim() || null;
+  try {
+    await getPool().query(
+      `INSERT INTO users (id, email, name, password_hash, github_id)
+       VALUES ($1::uuid, $2, $3, NULL, $4)`,
+      [id, email, name, input.githubId],
+    );
+  } catch (err) {
+    const code =
+      err && typeof err === "object" && "code" in err
+        ? String((err as { code: unknown }).code)
+        : "";
+    if (code === "23505") {
+      throw new AuthError("EMAIL_TAKEN", "Email already registered", 409);
+    }
+    throw err;
+  }
+  return { id, email, name };
+}
+
 export async function verifyUserCredentials(
   email: string,
   password: string,
 ): Promise<PublicUser | null> {
   const user = await findUserByEmail(email);
-  if (!user) {
+  if (!user?.passwordHash) {
     return null;
   }
   const ok = await verifyPassword(password, user.passwordHash);

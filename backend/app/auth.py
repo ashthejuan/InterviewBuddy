@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 import jwt
+import structlog
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -18,6 +19,7 @@ API_AUDIENCE = "interviewbuddy-api"
 ALGORITHM = "HS256"
 
 _bearer = HTTPBearer(auto_error=False)
+log = structlog.get_logger()
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,7 @@ def verify_access_token(token: str, *, secret: str) -> AuthedUser:
             issuer=API_ISSUER,
         )
     except jwt.PyJWTError as exc:
+        log.info("auth_token_invalid", reason=type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid or expired access token",
@@ -70,6 +73,7 @@ def verify_access_token(token: str, *, secret: str) -> AuthedUser:
 
     sub = payload.get("sub")
     if not isinstance(sub, str) or not sub:
+        log.info("auth_token_invalid", reason="missing_sub")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid access token subject",
@@ -78,6 +82,7 @@ def verify_access_token(token: str, *, secret: str) -> AuthedUser:
     try:
         user_id = uuid.UUID(sub)
     except ValueError as exc:
+        log.info("auth_token_invalid", reason="bad_sub")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid access token subject",
@@ -93,6 +98,11 @@ def verify_access_token(token: str, *, secret: str) -> AuthedUser:
 
 def require_owner(user: AuthedUser, resource_user_id: uuid.UUID) -> None:
     if user.id != resource_user_id:
+        log.info(
+            "auth_forbidden",
+            user_id=str(user.id),
+            resource_user_id=str(resource_user_id),
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="forbidden",
@@ -106,6 +116,7 @@ async def get_current_user(
 ) -> AuthedUser:
     settings = get_settings()
     if credentials is None or credentials.scheme.lower() != "bearer":
+        log.info("auth_missing_bearer")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="missing bearer token",

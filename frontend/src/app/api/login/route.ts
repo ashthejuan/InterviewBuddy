@@ -1,6 +1,19 @@
+import { clientIp } from "@/lib/auth/client-ip";
+import { loginLimiter } from "@/lib/auth/rate-limit";
 import { verifyUserCredentials } from "@/lib/auth/users";
 
 export async function POST(request: Request): Promise<Response> {
+  const limited = loginLimiter.check(`login:${clientIp(request)}`);
+  if (!limited.ok) {
+    return Response.json(
+      { error: "Too many login attempts — try again later." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(limited.retryAfterSeconds) },
+      },
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();

@@ -1,6 +1,19 @@
+import { clientIp } from "@/lib/auth/client-ip";
+import { signupLimiter } from "@/lib/auth/rate-limit";
 import { AuthError, createUser } from "@/lib/auth/users";
 
 export async function POST(request: Request): Promise<Response> {
+  const limited = signupLimiter.check(`signup:${clientIp(request)}`);
+  if (!limited.ok) {
+    return Response.json(
+      { error: "Too many signups from this network — try again later." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(limited.retryAfterSeconds) },
+      },
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();

@@ -1,3 +1,5 @@
+import { userMessageForStatus, withRetries } from "./retry";
+
 const API_BASE =
   process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
@@ -202,19 +204,25 @@ async function resolveAccessToken(): Promise<string> {
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = await resolveAccessToken();
-  const headers = new Headers(init?.headers);
-  headers.set("Authorization", `Bearer ${token}`);
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers,
-    cache: "no-store",
+  return withRetries(async () => {
+    const token = await resolveAccessToken();
+    const headers = new Headers(init?.headers);
+    headers.set("Authorization", `Bearer ${token}`);
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers,
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const detail = await readError(res);
+      throw new ApiError(
+        res.status,
+        userMessageForStatus(res.status, detail),
+      );
+    }
+    if (res.status === 204) return undefined as T;
+    return res.json() as Promise<T>;
   });
-  if (!res.ok) {
-    throw new ApiError(res.status, await readError(res));
-  }
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
 }
 
 export async function getHealth(): Promise<HealthResponse> {

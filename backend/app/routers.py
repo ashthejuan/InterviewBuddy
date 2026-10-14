@@ -13,6 +13,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     UploadFile,
     status,
 )
@@ -25,6 +26,14 @@ from sqlalchemy.orm import selectinload
 from app.auth import AuthedUser, get_current_user, require_owner
 from app.config import get_settings
 from app.db import get_session
+from app.rate_limit import (
+    answer_limiter,
+    client_key,
+    enforce,
+    report_retry_limiter,
+    upload_limiter,
+    voice_token_limiter,
+)
 from app.models import (
     Document,
     DocumentSection,
@@ -214,9 +223,15 @@ async def answer_session(
     session_id: uuid.UUID,
     body: AnswerIn,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: AsyncSession = Depends(get_session),
     current_user: AuthedUser = Depends(get_current_user),
 ) -> AnswerOut:
+    enforce(
+        answer_limiter,
+        client_key(request, str(current_user.id)),
+        route="answer",
+    )
     session = await _owned_session(session_id, db, current_user)
     if session.status != "live":
         raise HTTPException(
@@ -304,9 +319,15 @@ async def get_session_report(
 async def retry_session_report(
     session_id: uuid.UUID,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: AsyncSession = Depends(get_session),
     current_user: AuthedUser = Depends(get_current_user),
 ) -> SessionReportOut:
+    enforce(
+        report_retry_limiter,
+        client_key(request, str(current_user.id)),
+        route="report_retry",
+    )
     session = await _owned_session(session_id, db, current_user)
     if session.status != "completed":
         raise HTTPException(
@@ -504,9 +525,15 @@ async def voice_status() -> VoiceStatusOut:
 @router.post("/sessions/{session_id}/voice/token", response_model=VoiceTokenOut)
 async def create_voice_token(
     session_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_session),
     current_user: AuthedUser = Depends(get_current_user),
 ) -> VoiceTokenOut:
+    enforce(
+        voice_token_limiter,
+        client_key(request, str(current_user.id)),
+        route="voice_token",
+    )
     settings = get_settings()
     if not settings.voice_enabled:
         raise HTTPException(status_code=503, detail="voice is not configured on this server")
@@ -612,11 +639,17 @@ async def list_document_sections(
 async def upload_document(
     session_id: uuid.UUID,
     background_tasks: BackgroundTasks,
+    request: Request,
     doc_type: str = Form(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_session),
     current_user: AuthedUser = Depends(get_current_user),
 ) -> Document:
+    enforce(
+        upload_limiter,
+        client_key(request, str(current_user.id)),
+        route="upload",
+    )
     if doc_type not in ("resume", "jd"):
         raise HTTPException(status_code=400, detail="doc_type must be resume or jd")
 
@@ -681,9 +714,15 @@ async def paste_document(
     session_id: uuid.UUID,
     body: PasteDocumentIn,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: AsyncSession = Depends(get_session),
     current_user: AuthedUser = Depends(get_current_user),
 ) -> Document:
+    enforce(
+        upload_limiter,
+        client_key(request, str(current_user.id)),
+        route="paste",
+    )
     session = await _owned_session(session_id, db, current_user)
 
     settings = get_settings()
