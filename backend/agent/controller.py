@@ -5,8 +5,9 @@ No LiveKit imports: the worker adapts speech I/O onto this; tests drive it direc
 
 from __future__ import annotations
 
+import asyncio
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import InterviewSession, Turn
 from app.services import grill as grill_svc
+from app.services.scorer import schedule_turn_score
 
 CLOSING_LINE = (
     "That's the end of our interview. Thanks for your time — "
@@ -27,6 +29,36 @@ CLOSING_LINE = (
 class VoiceReply:
     text: str | None
     done: bool = False
+
+
+SpeechStarter = Callable[[AsyncIterator[str]], None]
+
+
+class SpeechPipe:
+    """Feeds a streamed question into one utterance, started on the first non-empty chunk."""
+
+    def __init__(self, start: SpeechStarter) -> None:
+        self._start = start
+        self._queue: asyncio.Queue[str | None] = asyncio.Queue()
+        self._closed = False
+        self.started = False
+
+    def push(self, text: str) -> None:
+        if not text or self._closed:
+            return
+        if not self.started:
+            self.started = True
+            self._start(self._chunks())
+        self._queue.put_nowait(text)
+
+    def close(self) -> None:
+        if self.started and not self._closed:
+            self._queue.put_nowait(None)
+        self._closed = True
+
+    async def _chunks(self) -> AsyncIterator[str]:
+        while (chunk := await self._queue.get()) is not None:
+            yield chunk
 
 
 class VoiceGrillController:
@@ -52,14 +84,27 @@ class VoiceGrillController:
             session = await db.get(InterviewSession, self.session_id)
             return dict(session.lexicon or {}) if session else {}
 
-    async def opening(self) -> VoiceReply:
-        """First (or resumed) question to speak on join."""
+    async def opening(self, start_speech: SpeechStarter | None = None) -> VoiceReply:
+        """First (or resumed) question to speak on join.
+
+        With `start_speech`, a freshly generated question is spoken while it streams and the
+        reply text is None (it is already playing)."""
+        pipe = SpeechPipe(start_speech) if start_speech else None
+        try:
+            return await self._opening(pipe)
+        finally:
+            if pipe is not None:
+                pipe.close()
+
+    async def _opening(self, pipe: SpeechPipe | None) -> VoiceReply:
         async with self._factory() as db:
             session = await self._load(db)
             if session is None or session.status != "live":
                 return VoiceReply(None, done=True)
-            await grill_svc.begin_interview(db, session)
+            await grill_svc.begin_interview(db, session, sink=pipe)
             await db.commit()
+            if pipe is not None and pipe.started:
+                return VoiceReply(None)
             last = (
                 await db.execute(
                     select(Turn)
@@ -70,21 +115,35 @@ class VoiceGrillController:
             ).scalar_one_or_none()
             return VoiceReply(last.raw_text if last else None)
 
-    async def handle_final_transcript(self, text: str) -> VoiceReply:
+    async def handle_final_transcript(
+        self, text: str, start_speech: SpeechStarter | None = None
+    ) -> VoiceReply:
+        """With `start_speech`, the next question is spoken while it streams (reply text None)."""
         text = (text or "").strip()
         if not text:
             return VoiceReply(None)
+        pipe = SpeechPipe(start_speech) if start_speech else None
+        try:
+            return await self._answer(text, pipe)
+        finally:
+            if pipe is not None:
+                pipe.close()
+
+    async def _answer(self, text: str, pipe: SpeechPipe | None) -> VoiceReply:
         async with self._factory() as db:
             session = await self._load(db)
             if session is None or session.status != "live":
                 return VoiceReply(None, done=True)
-            _, agent_turn = await grill_svc.submit_answer(db, session, text)
+            user_turn, agent_turn = await grill_svc.submit_answer(db, session, text, sink=pipe)
             await db.commit()
+            schedule_turn_score(user_turn.id)
             if session.status == "completed":
                 from app.services.report_job import schedule_report_job
 
                 schedule_report_job(session.id)
                 return VoiceReply(CLOSING_LINE, done=True)
+            if pipe is not None and pipe.started:
+                return VoiceReply(None)
             return VoiceReply(agent_turn.raw_text if agent_turn else None)
 
     async def poll(self, now: datetime | None = None) -> VoiceReply | None:

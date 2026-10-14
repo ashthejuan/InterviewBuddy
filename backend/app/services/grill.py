@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -20,16 +22,24 @@ from app.services.grill_engine import (
     begin as eng_begin,
     end as eng_end,
 )
-from app.services.grill_questions import generate_question
+from app.services.grill_policy import merge_lagged_signal
+from app.services.grill_prompt import recent_qa_pairs
+from app.services.grill_questions import QuestionSink, generate_question
 from app.services.report_job import ensure_report_pending
 from app.services.scorer import (
+    deferred_scoring,
     finalize_session_results,
+    lagged_signal,
     persist_turn_score,
     refresh_topic_rollup,
     score_answer,
+    score_pending_turns,
+    steering_signal,
 )
 from app.services.scoring import score_signal
 from app.services.transcript_correct import correct_transcript
+
+log = structlog.get_logger()
 
 
 def _now() -> datetime:
@@ -183,6 +193,8 @@ async def _rewrite_agent_turns(
     new_turns: list[MemTurn],
     *,
     prior_user_answer: str | None,
+    sink: QuestionSink | None = None,
+    history: list[tuple[str, str]] | None = None,
 ) -> None:
     for nt in new_turns:
         if nt.role != "agent":
@@ -205,7 +217,30 @@ async def _rewrite_agent_turns(
             prior_user_answer=prior_user_answer if followup else None,
             directive=nt.directive,
             kind=topic.kind,
+            sink=sink,
+            # Openers start a new topic: no history, so they can't pull the old story forward.
+            history=history if followup else None,
         )
+
+
+async def _recent_history(
+    db: AsyncSession, session_id: uuid.UUID, topic_id: str | None, current_answer: str
+) -> list[tuple[str, str]]:
+    """Last Q/A pairs on `topic_id`, including the answer being submitted (not yet persisted).
+
+    Topic-scoped so a follow-up never borrows another topic's story."""
+    if topic_id is None:
+        return []
+    rows = (
+        await db.execute(
+            select(Turn.role, Turn.normalized_text, Turn.raw_text)
+            .where(Turn.session_id == session_id, Turn.topic_id == uuid.UUID(topic_id))
+            .order_by(Turn.created_at.desc(), Turn.id.desc())
+            .limit(4)
+        )
+    ).all()
+    turns = [(role, norm or raw or "") for role, norm, raw in reversed(rows)]
+    return recent_qa_pairs([*turns, ("user", current_answer)])
 
 
 async def _last_agent_text(db: AsyncSession, session_id: uuid.UUID) -> str:
@@ -220,7 +255,9 @@ async def _last_agent_text(db: AsyncSession, session_id: uuid.UUID) -> str:
     return row or ""
 
 
-async def begin_interview(db: AsyncSession, session: InterviewSession) -> Turn | None:
+async def begin_interview(
+    db: AsyncSession, session: InterviewSession, *, sink: QuestionSink | None = None
+) -> Turn | None:
     """Activate first topic and persist opening agent question. Idempotent if turns exist."""
     existing = await db.execute(
         select(Turn).where(Turn.session_id == session.id).limit(1)
@@ -233,7 +270,7 @@ async def begin_interview(db: AsyncSession, session: InterviewSession) -> Turn |
     eng_begin(mem)
     new_turns = mem.turns[before:]
     await _rewrite_agent_turns(
-        db, session, mem, new_turns, prior_user_answer=None
+        db, session, mem, new_turns, prior_user_answer=None, sink=sink
     )
     now = _now()
     meta = _grill_meta(session)
@@ -247,40 +284,82 @@ async def begin_interview(db: AsyncSession, session: InterviewSession) -> Turn |
 
 
 async def submit_answer(
-    db: AsyncSession, session: InterviewSession, text: str
+    db: AsyncSession,
+    session: InterviewSession,
+    text: str,
+    *,
+    sink: QuestionSink | None = None,
 ) -> tuple[Turn, Turn | None]:
     """Persist user answer + next agent turn (or wrap). Returns (user_turn, agent_turn|None).
 
     `text` is the raw answer (typed or STT final); grill, retrieval and scoring use the
-    lexicon-corrected form. The rubric score is computed first so its flags can steer the frontier.
+    lexicon-corrected form. A signal is computed first so it can steer the frontier.
+    With LLM scoring (`deferred_scoring()`), steering uses `steering_signal` (capped classifier,
+    heuristic fallback) folded with the previous same-topic LLM score; the caller must
+    `schedule_turn_score(user_turn.id)` after commit and the rubric score lands later.
     """
+    started = time.perf_counter()
     now = _now()
     normalized, corrections = correct_transcript(text, session.lexicon)
     mem = await _load_mem(db, session)
     seconds = _topic_seconds(session, now)
+    deferred = deferred_scoring()
+    prev_directive = _grill_meta(session).get("last_directive")
+    history = await _recent_history(db, session.id, mem.active_topic_id, normalized)
 
     scored_topic: SessionTopic | None = None
     draft = None
     signal = None
+    steer_source = None
     if mem.active_topic_id:
         scored_topic = await db.get(SessionTopic, uuid.UUID(mem.active_topic_id))
     if scored_topic is not None:
         node = next((n for n in mem.nodes if n.id == mem.active_node_id), None)
-        draft = await score_answer(
-            db,
-            session,
-            scored_topic,
-            intent=(node.intent if node else "") or scored_topic.title,
-            question=await _last_agent_text(db, session.id),
-            answer=normalized,
-        )
-        signal = score_signal(draft, kind=scored_topic.kind)
+        intent = (node.intent if node else "") or scored_topic.title
+        question = await _last_agent_text(db, session.id)
+        if deferred:
+            signal, steer_source = await steering_signal(
+                db,
+                session,
+                scored_topic,
+                intent=intent,
+                question=question,
+                answer=normalized,
+                prior_answer=history[-2][1] if len(history) > 1 else None,
+            )
+            signal = merge_lagged_signal(
+                signal,
+                await lagged_signal(db, session.id, scored_topic),
+                last_directive=prev_directive,
+            )
+        else:
+            draft = await score_answer(
+                db, session, scored_topic, intent=intent, question=question, answer=normalized
+            )
+            signal = score_signal(draft, kind=scored_topic.kind)
+            steer_source = "rubric"
+    scored_at = time.perf_counter()
 
     before = len(mem.turns)
     next_q = eng_answer(mem, normalized, seconds_on_topic=seconds, signal=signal)
     new_turns = mem.turns[before:]
     await _rewrite_agent_turns(
-        db, session, mem, new_turns, prior_user_answer=normalized
+        db,
+        session,
+        mem,
+        new_turns,
+        prior_user_answer=normalized,
+        sink=sink,
+        history=history,
+    )
+    log.info(
+        "grill_turn_timing",
+        session_id=str(session.id),
+        deferred_scoring=deferred,
+        steer_source=steer_source,
+        signal=signal,
+        score_ms=round((scored_at - started) * 1000),
+        question_ms=round((time.perf_counter() - scored_at) * 1000),
     )
 
     meta = _grill_meta(session)
@@ -296,6 +375,7 @@ async def submit_answer(
         meta["active_node_id"] = mem.active_node_id
     agent_directives = [t.directive for t in new_turns if t.role == "agent"]
     meta["last_score_signal"] = signal
+    meta["last_steer_source"] = steer_source
     meta["last_directive"] = agent_directives[-1] if agent_directives else None
     meta["last_exit_reason"] = mem.last_exit_reason
     _set_grill_meta(session, meta)
@@ -305,10 +385,11 @@ async def submit_answer(
     user_turn.raw_text = text
     user_turn.normalized_text = normalized
     user_turn.corrections = corrections
-    if draft is not None and scored_topic is not None:
+    if draft is not None and scored_topic is not None and not deferred:
         persist_turn_score(db, user_turn, draft)
         await refresh_topic_rollup(db, scored_topic)
     if mem.status == "completed":
+        await score_pending_turns(db, session)
         await finalize_session_results(db, session)
         await ensure_report_pending(db, session.id)
     agent_turns = [t for t in persisted if t.role == "agent"]
@@ -327,5 +408,6 @@ async def end_interview(
     meta["wrap_reason"] = mem.wrap_reason or reason
     meta.pop("topic_started_at", None)
     _set_grill_meta(session, meta)
+    await score_pending_turns(db, session)
     await finalize_session_results(db, session)
     await ensure_report_pending(db, session.id)

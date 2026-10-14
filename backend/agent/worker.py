@@ -1,5 +1,7 @@
 """LiveKit agent worker: Sarvam STT → deterministic correction → grill engine → Sarvam TTS.
 
+Generated questions stream into TTS as the LLM writes them (controller `SpeechPipe`).
+
 Run from backend/:  uv run python -m agent.worker dev
 The agent has no LLM of its own; every reply comes from the grill engine via the controller,
 so LiveKit only owns transport, VAD, turn-taking and barge-in.
@@ -9,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import structlog
@@ -128,13 +131,18 @@ class GrillVoiceAgent(Agent):
         )
         self._controller = controller
 
+    def _start_speech(self, chunks: AsyncIterator[str]) -> None:
+        self.session.say(chunks, allow_interruptions=False)
+
     async def on_enter(self) -> None:
-        speak(self.session, await self._controller.opening())
+        speak(self.session, await self._controller.opening(self._start_speech))
 
     async def on_user_turn_completed(
         self, turn_ctx: ChatContext, new_message: ChatMessage
     ) -> None:
-        reply = await self._controller.handle_final_transcript(new_message.text_content or "")
+        reply = await self._controller.handle_final_transcript(
+            new_message.text_content or "", self._start_speech
+        )
         speak(self.session, reply)
         raise StopResponse()
 

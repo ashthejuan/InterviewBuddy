@@ -132,6 +132,24 @@ def apply_score_signal(
     return exit_, reason, None
 
 
+def merge_lagged_signal(
+    current: str | None, lagged: str | None, *, last_directive: str | None
+) -> str | None:
+    """Fold the previous same-topic answer's LLM signal into the current steering signal.
+
+    The current answer wins, except: a missed integrity issue earns one probe (unless the last
+    question already probed), and a topic with a solid scored answer may rotate when the
+    current answer gives no signal.
+    """
+    if current == "probe":
+        return current
+    if lagged == "probe" and last_directive != "probe":
+        return "probe"
+    if current is None and lagged == "scorable":
+        return "scorable"
+    return current
+
+
 def pick_next_topic(topics: list[dict[str, Any]]) -> dict[str, Any] | None:
     planned = [t for t in topics if t.get("status") == "planned"]
     if not planned:

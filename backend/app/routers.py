@@ -73,7 +73,7 @@ from app.services.export_transcript import build_export_payload, write_transcrip
 from app.services.prep import run_extract_job
 from app.services.report_job import ensure_report_pending, run_report_job
 from app.services.report_pdf import render_report_pdf
-from app.services.scorer import finalize_session_results
+from app.services.scorer import finalize_session_results, schedule_turn_score
 from app.services.storage import StorageError, build_object_key, put_bytes
 from app.services.voice import mint_voice_grant
 from app.services.validate_upload import (
@@ -240,6 +240,7 @@ async def answer_session(
         )
     user_turn, agent_turn = await grill_svc.submit_answer(db, session, body.text.strip())
     await db.commit()
+    schedule_turn_score(user_turn.id)
     await db.refresh(session)
     await db.refresh(user_turn)
     if agent_turn is not None:

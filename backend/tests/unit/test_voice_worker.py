@@ -37,15 +37,28 @@ class FakeSession:
 
 
 class FakeController:
-    def __init__(self, reply: VoiceReply) -> None:
+    def __init__(self, reply: VoiceReply, streamed: list[str] | None = None) -> None:
         self.reply = reply
+        self.streamed = streamed
         self.heard: list[str] = []
 
-    async def handle_final_transcript(self, text: str) -> VoiceReply:
+    def _maybe_stream(self, start_speech) -> None:
+        if self.streamed is None:
+            return
+
+        async def chunks():
+            for c in self.streamed or []:
+                yield c
+
+        start_speech(chunks())
+
+    async def handle_final_transcript(self, text: str, start_speech=None) -> VoiceReply:
         self.heard.append(text)
+        self._maybe_stream(start_speech)
         return self.reply
 
-    async def opening(self) -> VoiceReply:
+    async def opening(self, start_speech=None) -> VoiceReply:
+        self._maybe_stream(start_speech)
         return self.reply
 
 
@@ -99,9 +112,11 @@ def test_speak_nothing_for_empty_reply() -> None:
     assert session.said == [] and session.shutdowns == []
 
 
-def _agent_with(monkeypatch: pytest.MonkeyPatch, reply: VoiceReply):
+def _agent_with(
+    monkeypatch: pytest.MonkeyPatch, reply: VoiceReply, streamed: list[str] | None = None
+):
     fake_session = FakeSession()
-    controller = FakeController(reply)
+    controller = FakeController(reply, streamed)
     monkeypatch.setattr(GrillVoiceAgent, "session", property(lambda _self: fake_session))
     return GrillVoiceAgent(controller), controller, fake_session  # type: ignore[arg-type]
 
@@ -127,3 +142,27 @@ def test_on_enter_speaks_opening(monkeypatch: pytest.MonkeyPatch) -> None:
     agent, _, session = _agent_with(monkeypatch, VoiceReply("Welcome — tell me about yourself."))
     asyncio.run(agent.on_enter())
     assert session.said == [("Welcome — tell me about yourself.", False)]
+
+
+async def _drain(stream) -> list[str]:
+    return [c async for c in stream]
+
+
+def test_streamed_question_is_spoken_as_it_arrives(monkeypatch: pytest.MonkeyPatch) -> None:
+    agent, _, session = _agent_with(
+        monkeypatch, VoiceReply(None), streamed=["How did you ", "shard it?"]
+    )
+    msg = ChatMessage(role="user", content=["I sharded the ledger"])
+    with pytest.raises(StopResponse):
+        asyncio.run(agent.on_user_turn_completed(ChatContext.empty(), msg))
+    assert len(session.said) == 1
+    stream, allow_interruptions = session.said[0]
+    assert allow_interruptions is False
+    assert asyncio.run(_drain(stream)) == ["How did you ", "shard it?"]
+
+
+def test_streamed_opening_is_spoken(monkeypatch: pytest.MonkeyPatch) -> None:
+    agent, _, session = _agent_with(monkeypatch, VoiceReply(None), streamed=["Welcome."])
+    asyncio.run(agent.on_enter())
+    assert len(session.said) == 1
+    assert asyncio.run(_drain(session.said[0][0])) == ["Welcome."]

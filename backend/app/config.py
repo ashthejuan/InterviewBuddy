@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     grill_backend: str = "auto"
     # auto | heuristic | openrouter — rubric scorer; heuristic fallback on LLM failure
     score_backend: str = "auto"
+    # Optional faster model for the 0.8 s steering classifier; blank = DEFAULT_GRILL_MODEL
+    steer_model: str = ""
     # auto | heuristic | openrouter — report prose; heuristic fallback on LLM failure
     report_backend: str = "auto"
 
